@@ -28,20 +28,20 @@ You will need the following resources:
 You can sign up for an account at <https://aws.amazon.com>.
 
 #### 1
-[ ] Email address
-[ ] password
-[ ] verify
+* [ ] Email address
+* [ ] password
+* [ ] verify
 
 #### 2
 
-[ ] Your full name
-[ ] Your phone number
-[ ] Your address
-[ ] agree to the [customer agreement](https://aws.amazon.com/agreement/)
+* [ ] Your full name
+* [ ] Your phone number
+* [ ] Your address
+* [ ] agree to the [customer agreement](https://aws.amazon.com/agreement/)
 
 #### 3
 
-[ ] Credit card info (can you use visa gift cards?)
+* [ ] Credit card info (can you use visa gift cards?)
 * You WILL NOT pay until using non-free-tier resources. For quickhost, we're
   interested in the `750 hours` of EC2 usage (for the first 12 months). See
   <https://aws.amazon.com/free> 
@@ -49,14 +49,14 @@ You can sign up for an account at <https://aws.amazon.com>.
 #### 4 Confirm your identity
 
 * You will be prompted to enter another phone number to confirm.
-[ ] ok
+* [ ] ok
 
 #### 5 Choose your support plan
 
 I will be your support plan. Make a pull-request with your question, and I'll
 do my best to answer accurately, as soon as possible.
 
-[ ] free
+* [ ] free
 
 Click the go to the console button to continue getting your VPC ID
 
@@ -99,20 +99,20 @@ E.g.
 ```
 
 #### IAM group - quickhost-admin
-[ ] group-name - quickhost-admin
-[ ] policy - quickhost-create
-[ ] policy - quickhost-describe
-[ ] policy - quickhost-update
-[ ] policy - quickhost-destroy
+* [ ] group-name - quickhost-admin
+* [ ] policy - quickhost-create
+* [ ] policy - quickhost-describe
+* [ ] policy - quickhost-update
+* [ ] policy - quickhost-destroy
 
 #### IAM user - quickhost
 
 Click the IAM service --> Users --> Create User
 
-[ ] Username = quickhost
-[ ] Access Type = Access Key - Programatic Access
-[ ] groups - quickhost-admin
-[ ] get and store aws credentials
+* [ ] Username = quickhost
+* [ ] Access Type = Access Key - Programatic Access
+* [ ] groups - quickhost-admin
+* [ ] get and store aws credentials
 
 
 ### VPC ID
@@ -124,8 +124,8 @@ Click the `VPC` service -> Create new.
 
 * "VPC Only" (idk what the other option sets up behind your back)
 
-[ ] tag (for example, quickhost)
-[ ] cidr block (for example, 10.11.0.0/16) (use big ranges here, these confine your options for public subnet cidrs)
+* [ ] tag (for example, quickhost)
+* [ ] cidr block (for example, 10.11.0.0/16) (use big ranges here, these confine your options for public subnet cidrs)
 
 * the rest default (quickhost doesn't support ipv6)
 
@@ -135,9 +135,9 @@ Output: your `vpc-id` (for example, vpc-0e855b6315b73c33d)
 
 From the VPC service's console, click Subnets --> Create Subnet
 
-[ ] Select the VPC created above from the dropdown
-[ ] Tag with `quickhost` for Name
-[ ] Enter/select the desired cidr range (for example, 10.11.12.0/24)
+* [ ] Select the VPC created above from the dropdown
+* [ ] Tag with `quickhost` for Name
+* [ ] Enter/select the desired cidr range (for example, 10.11.12.0/24)
 
 Output: your `subnet-id` (for example, subnet-083c35291b743face)
 
@@ -152,7 +152,7 @@ make them publically accessible!*
 From the VPC service's console, click Internet Gateways --> Create Internet
 Gateway
 
-[ ] Tag with `quickhost` for Name
+* [ ] Tag with `quickhost` for Name
 
 Click create --> Output: Internet Gateway (igw-04ccfe98927415391)
 
