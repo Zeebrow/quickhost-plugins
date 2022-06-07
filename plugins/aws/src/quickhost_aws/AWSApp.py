@@ -57,6 +57,16 @@ class AWSApp(quickhost.AppBase):
         self.sgid = None
         self.load_default_config()
 
+    @classmethod
+    def plugin_init():
+        """
+        Setup the following:
+        - IAM
+        - vpc/subnet
+        - igw/rtb
+        """
+        pass
+
     def _all_cfg_key(self):
         return f'{self._cli_parser_id}:all'
     def _app_cfg_key(self):
