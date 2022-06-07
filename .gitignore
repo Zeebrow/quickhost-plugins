@@ -1,3 +1,17 @@
+###
+# my preferences
+**/venv*
+venv-pytest
+postups/*/
+userdatas/*userdata*
+**.egg*
+tmp
+*.json
+**.tar.gz
+**.swp
+**.pem
+###
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
