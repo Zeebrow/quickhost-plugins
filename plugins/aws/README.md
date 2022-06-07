@@ -16,13 +16,13 @@ you wish to use (AWS is free ;)
 
 You will need the following resources:
 
-[ ] AWS account (15 minutes, free)
+* [ ] AWS account (15 minutes, free)
 
-[ ] vpc id (5 minutes, free)
+* [ ] vpc id (5 minutes, free)
 
-[ ] subnet id (5 mintes, free)
+* [ ] subnet id (5 mintes, free)
 
-[ ] linkages (5 minutes, free)
+* [ ] linkages (5 minutes, free)
 
 ### AWS account
 
