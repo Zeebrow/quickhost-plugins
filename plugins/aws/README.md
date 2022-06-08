@@ -1,8 +1,7 @@
 # AWS plugin for quickhost
 
 `NOTE`
-A better way to do this would be to *not* use a root account. This should be
-done outside of `quickhost`.
+This is a comprehensive setup - several steps will be automated in the future.
 
 `quickhost` is a plugin-driven program.
 
@@ -14,20 +13,30 @@ you wish to use (AWS is free ;)
 
 ## 7 June 2021
 
-You will need the following resources:
+You will create the following resources:
 
 * [ ] AWS account (15 minutes, free)
-* [ ] vpc id (5 minutes, free)
-* [ ] subnet id (5 mintes, free)
+* [ ] AWS linked account setup (5 minutes, free, optional, recommended)
+* [ ] AWS User permissions (X minutes, free)
+* [ ] Break (at least 15 minutes, FREE!)
+* [ ] vpc id, subnet id (5 mintes, free)
 * [ ] linkages (5 minutes, free)
 
-### AWS account
+### AWS root account setup
 
 (15 minutes)
 
+Seems like a lot, but 1-5 are just so you know what you'll be asked and when.
+
+* [ ] email #1: Root account
+* [ ] email #2: Governed account (optional)
+* [ ] SMS telephone number
+* [ ] Credit card info
+
 You can sign up for an account at <https://aws.amazon.com>.
 
-#### 1
+#### 1 Link email to root account
+* [ ] Account name (for example, MyRootAccount)
 * [ ] Email address
 * [ ] password
 * [ ] verify
@@ -48,26 +57,52 @@ You can sign up for an account at <https://aws.amazon.com>.
 
 #### 4 Confirm your identity
 
-* You will be prompted to enter another phone number to confirm.
 * [ ] ok
 
-#### 5 Choose your support plan
+#### 5 Choose a support plan
 
-I will be your support plan. Make a pull-request with your question, and I'll
+I will be your support plan. Make an issue with your question, and I'll
 do my best to answer accurately, as soon as possible.
-
-* [ ] free
 
 Click the go to the console button to continue getting your VPC ID
 
-### AWS User (IAM)
+### AWS linked account setup (optional, recommended)
+
+AWS Organizations --> AWS accounts/Invitations --> Invite AWS account -->
+create new
+
+* Once you receive email, sign out of your root account, and login again with
+your 2nd email (use the 'root account' bubble on the sign-in page)
+* set your password with the "forgot password" link
+* sign in
+
+### AWS User setup (IAM)
 
 NOTE: In a future release, all operations performed by this user will be
 delegated to an IAM Role instead.
 
+NOTHER NOTE: a lot of the data here is for me to automate. I need to think
+about the right way to go about setting up permissions, transparently and
+effectively.
+
+Create a set of credentials for quickhost to use to initialize itself (delete
+when done)
+
+* visit
+  <https://us-east-1.console.aws.amazon.com/iam/home#/security_credentials> for
+  your region
+* Access Keys --> Create Access key
+  - download keyfile? or prompt at cli?
+* run one of the following: 
+  - `main.py init aws --root-key-file`
+  - `main.py init aws --access-key-id ABC --secret XYZ`
+  - `main.py init aws` and follow the prompts (protected by Python3's `getpass`)
+
+
+
 #### IAM Policy: quickhost-describe
 
-E.g.
+E.g:
 
 ```json
 {

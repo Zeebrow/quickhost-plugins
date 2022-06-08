@@ -57,15 +57,27 @@ class AWSApp(quickhost.AppBase):
         self.sgid = None
         self.load_default_config()
 
-    @classmethod
-    def plugin_init():
+    def plugin_init(root_aws_access_key_id, root_aws_secret_access_key):
         """
         Setup the following:
         - IAM
         - vpc/subnet
         - igw/rtb
         """
-        pass
+        self._parse_init()
+        iam = boto3.client(
+            'iam',
+            aws_access_key_id=root_aws_access_key_id,
+            aws_secret_access_key=root_aws_secret_access_key
+        )
+        sts = boto3.client(
+            'sts',
+            aws_access_key_id=root_aws_access_key_id,
+            aws_secret_access_key=root_aws_secret_access_key
+        )
+        print(sts.get_caller_identity())
+        return 
+        
 
     def _all_cfg_key(self):
         return f'{self._cli_parser_id}:all'
@@ -102,6 +114,13 @@ class AWSApp(quickhost.AppBase):
             print(f"No app config ({self._app_cfg_key()}) found in config file '{self.config_file}'")
             app_config = None
 
+    def init_parser_arguments(self, parser: ArgumentParser):
+        parser.add_argument("-a", "--aws-access-key-id", required=False, action='store_true', help="the access key id provided when creating root account credentials")
+        parser.add_argument("-x", "--aws-secret-access-key", required=False, action='store_true', help="the secret access key provided when creating root account credentials")
+        parser.add_argument("-f", "--root-key-csv", required=False, action='store_true', help="path to the rootkey.csv file downloaded when creating root account credentials")
+        return None
+
+
     def update_parser_arguments(self, parser: ArgumentParser):
         parser.add_argument("-y", "--dry-run", required=False, action='store_true', help="prevents any resource creation when set")
         parser.add_argument("-p", "--port", required=False, type=int, action='append', default=SUPPRESS, help="add an open tcp port to security group, applied to all ips")
@@ -136,7 +155,13 @@ class AWSApp(quickhost.AppBase):
         Subsequently calls an appropriate AWSApp CRUD method.
         This method overrides AWSApp instance properties that were set after load_default_config() returns.
         """
-        if args['__qhaction'] == 'make':
+        if args['__qhaction'] == 'init':
+            print('init')
+            print(args)
+            exit()
+            self.plugin_init(args)
+            return 0
+        elif args['__qhaction'] == 'make':
             print('make')
             self.create(args)
             return 0
@@ -154,6 +179,11 @@ class AWSApp(quickhost.AppBase):
             return 1
         else:
             raise Exception("should have printed help in main.py! Bug!")
+
+    def _parse_init(self, args: dict):
+        flags = args.keys()
+        print(args)
+
     
     def _parse_make(self, args: dict):
         flags = args.keys()
@@ -213,6 +243,8 @@ class AWSApp(quickhost.AppBase):
             self.vpc_id= args['vpc_id']
         if 'subnet_id' in flags:
             self.subnet_id= args['subnet_id']
+
+        return
     ### end of _parse_make()
 
 
