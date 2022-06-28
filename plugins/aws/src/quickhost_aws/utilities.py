@@ -2,6 +2,8 @@ import datetime
 import json
 import urllib.request
 
+QH_Tag= lambda app_name: { 'Key': 'quickhost', 'Value': app_name }
+
 def convert_datetime_to_string(thing):
     """
     Remove all datetime objects from a dict, and convert them to a string

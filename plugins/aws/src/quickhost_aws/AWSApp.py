@@ -18,6 +18,7 @@ from quickhost import APP_CONST as C
 from .AWSSG import SG
 from .AWSHost import AWSHost
 from .AWSKeypair import KP
+from .AWSVpc import AWSVpc
 
 logger = logging.getLogger(__name__)
 
@@ -57,25 +58,32 @@ class AWSApp(quickhost.AppBase):
         self.sgid = None
         self.load_default_config()
 
-    def plugin_init(root_aws_access_key_id, root_aws_secret_access_key):
+    def plugin_init(self, args: dict):
         """
         Setup the following:
         - IAM
-        - vpc/subnet
-        - igw/rtb
         """
-        self._parse_init()
+        self._parse_init(args)
         iam = boto3.client(
             'iam',
-            aws_access_key_id=root_aws_access_key_id,
-            aws_secret_access_key=root_aws_secret_access_key
         )
         sts = boto3.client(
             'sts',
-            aws_access_key_id=root_aws_access_key_id,
-            aws_secret_access_key=root_aws_secret_access_key
         )
-        print(sts.get_caller_identity())
+        caller_id = sts.get_caller_identity()
+        caller_id.pop('ResponseMetadata')
+        inp = input(f"About to initialize quickhost for this user/account: \n{json.dumps(caller_id, indent=2)}\n\nContinue? (y/n)")
+        if not inp.lower() == ('y' or 'yes'):
+            print('Aborted')
+            exit(3)
+        networking_params= AWSVpc(
+            app_name=self.app_name,
+            client=self._client,
+        )
+        p = networking_params.create()
+        #p = networking_params.destroy()
+        #p = networking_params.get()
+        print(p)
         return 
         
 
@@ -84,11 +92,18 @@ class AWSApp(quickhost.AppBase):
     def _app_cfg_key(self):
         return f'{self.app_name}:{self._cli_parser_id}'
     def load_default_config(self):
+        networking_params = AWSVpc(
+            app_name=self.app_name,
+            client=self._client,
+        ).get()
+        self.vpc_id = networking_params['vpc_id']
+        self.subnet_id = networking_params['subnet_id']
+
+    def _old_load_default_config(self):
         """
         read values from config file, and import the relevant ones
         run before load_cli_args()
         """
-        print("==============> load")
         try:
             all_config = self._config_file_parser[self._all_cfg_key()]
             for k in all_config:
@@ -96,10 +111,8 @@ class AWSApp(quickhost.AppBase):
                     self.__dict__[k] = self._config_file_parser[self._all_cfg_key()][k]
                 else:
                     logger.warning(f"Ignoring bad param in config: '{k}'")
-                    print(f"Ignoring bad param in config: '{k}'")
         except KeyError:
             logger.debug(f"No '_all' config ({self._all_cfg_key()}) found in config file '{self.config_file}'")
-            print(f"No '_all' config ({self._all_cfg_key()}) found in config file '{self.config_file}'")
             all_config = None
         try:
             app_config = self._config_file_parser[self._app_cfg_key()]
@@ -108,18 +121,19 @@ class AWSApp(quickhost.AppBase):
                     self.__dict__[k] = self._config_file_parser[self._app_cfg_key()][k]
                 else:
                     logger.warning(f"Ignoring bad param in config: '{k}'")
-                    print(f"Ignoring bad param in config: '{k}'")
         except KeyError:
             logger.debug(f"No app config ({self._app_cfg_key()}) found in config file '{self.config_file}'")
-            print(f"No app config ({self._app_cfg_key()}) found in config file '{self.config_file}'")
             app_config = None
 
     def init_parser_arguments(self, parser: ArgumentParser):
-        parser.add_argument("-a", "--aws-access-key-id", required=False, action='store_true', help="the access key id provided when creating root account credentials")
-        parser.add_argument("-x", "--aws-secret-access-key", required=False, action='store_true', help="the secret access key provided when creating root account credentials")
-        parser.add_argument("-f", "--root-key-csv", required=False, action='store_true', help="path to the rootkey.csv file downloaded when creating root account credentials")
+        #parser.add_argument("-y", "--dry-run", required=False, action='store_true', help="prevents any resource creation when set")
+        #parser.add_argument("-a", "--aws-access-key-id", required=False, action='store_true', help="the access key id provided when creating root account credentials")
+        #parser.add_argument("-x", "--aws-secret-access-key", required=False, action='store_true', help="the secret access key provided when creating root account credentials")
+        #parser.add_argument("-f", "--root-key-csv", required=False, action='store_true', help="path to the rootkey.csv file downloaded when creating root account credentials")
         return None
 
+    def describe_parser_arguments(self, parser: ArgumentParser):
+        pass
 
     def update_parser_arguments(self, parser: ArgumentParser):
         parser.add_argument("-y", "--dry-run", required=False, action='store_true', help="prevents any resource creation when set")
@@ -128,7 +142,7 @@ class AWSApp(quickhost.AppBase):
         parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
         parser.add_argument("--ami", required=False, default=SUPPRESS, help="change the ami to launch, see source-aliases for getting lastest")
         parser.add_argument("-u", "--userdata", required=False, default=SUPPRESS, help="path to optional userdata file")
-        pass
+        return None
 
     def make_parser_arguments(self, parser: ArgumentParser):
         """arguments for `aws make`"""
@@ -145,7 +159,7 @@ class AWSApp(quickhost.AppBase):
         return None
 
     @classmethod
-    def parser_arguments(self, subparser: ArgumentParser) -> None:
+    def parser_arguments(subparser: ArgumentParser) -> None:
         """required cli arguments, as well as allowed overrides"""
         pass
     
@@ -182,8 +196,6 @@ class AWSApp(quickhost.AppBase):
 
     def _parse_init(self, args: dict):
         flags = args.keys()
-        print(args)
-
     
     def _parse_make(self, args: dict):
         flags = args.keys()
@@ -220,7 +232,6 @@ class AWSApp(quickhost.AppBase):
         # ec2 key name
         if 'key_name' in flags:
             self.key_name = args['key_name']
-            print('=========>',args['key_name'])
         else:
             self.key_name = args['app_name']
         # ec2 key pem file
@@ -248,8 +259,8 @@ class AWSApp(quickhost.AppBase):
     ### end of _parse_make()
 
 
-    def _parse_describe(self, args: dict):
-        flags = args.keys()
+    def _parse_describe(self):
+        #flags = args.keys()
         self.dry_run = False
         return
         
@@ -283,13 +294,13 @@ class AWSApp(quickhost.AppBase):
         return None
 
     def describe(self, args: dict) -> None:
-        self._parse_describe(args)
+        print(self.vpc_id)
+        print(self.vpc_id)
+        self._parse_describe()
         _sg = SG(
             client=self._client,
             app_name=self.app_name,
             vpc_id=self.vpc_id,
-            ports=self.ports,
-            cidrs=self.cidrs,
             dry_run=False
         )
         _kp = KP(
@@ -330,8 +341,8 @@ class AWSApp(quickhost.AppBase):
             client=self._client,
             app_name=self.app_name,
             vpc_id=self.vpc_id,
-            ports=self.ports,
-            cidrs=self.cidrs,
+            ports=args['port'],
+            cidrs=args['cidr'],
             dry_run=self.dry_run,
         )
         self.sgid = _sg.create()
