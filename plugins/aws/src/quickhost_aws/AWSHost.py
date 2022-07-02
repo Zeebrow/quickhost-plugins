@@ -8,22 +8,20 @@ import boto3
 from botocore.exceptions import ClientError
 
 import quickhost
-from quickhost import APP_CONST as C
+from quickhost import APP_CONST as QHC
+from quickhost.temp_data_collector import store_test_data
 
-#from .utilities import get_my_public_ip, convert_datetime_to_string
-#from .constants import *
-#from .cli_params import AppBase, AppConfigFileParser
 from .AWSSG import SG
-
-#temporary
-from .temp_data_collector import store_test_data
+from .constants import AWSConstants as AWS
 
 logger = logging.getLogger(__name__)
 
 class AWSHost:
-    def __init__(self, client: any, app_name, num_hosts, image_id, instance_type, sgid, subnet_id, userdata, dry_run, key_name=None ):
+    def __init__(self, client: any, ec2_resource, app_name):
         self.client = client
+        self.ec2 = ec2_resource
         self.app_name=app_name
+        return 
         self.num_hosts=num_hosts
         self.image_id=image_id
         self.instance_type=instance_type
@@ -36,13 +34,47 @@ class AWSHost:
         self.dry_run=dry_run
         self.app_instances = []
 
+    def destroy(self):
+        instance_ids = self.get_instance_ids()
+        print(f"{instance_ids=}")
+        #self.describe()
+        instances = []
+        for i in instance_ids:
+            instances.append(self.ec2.Instance(self.instance_id))
+        print(len(instances))
+
+
+    def get_instance_ids(self, state_list=['running', 'starting']) -> List[str]:
+        """Given the app_name, returns the instance id off all instances with a State of 'running'"""
+        running_instances = []
+        _app_hosts = self.client.describe_instances(
+            Filters=[
+                { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
+                { 'Name': 'instance-state-name', 'Values': state_list },
+            ],
+            DryRun=False,
+            MaxResults=10,
+            #NextToken='string'
+        )
+        #print(json.dumps(convert_datetime_to_string(_app_hosts),indent=2))
+        store_test_data(resource='AWSHost', action='describe', response_data=quickhost.convert_datetime_to_string(_app_hosts))
+        for r in _app_hosts['Reservations']:
+            for host in r['Instances']:
+                if host['State']['Name'] in state_list:
+                    running_instances.append({'instance-id': host['InstanceId'], 'state': host['State']['Name']})
+                    inst = self._descibe_instance(inst=host)
+                    continue
+        return running_instances
+
+
+
     @classmethod
-    def get_latest_image(self, client=None):
+    def get_latest_image(self, os=QHC.DEFAULT_APP_NAME):
         """
         Get the latest amazon linux 2 ami
         TODO: see source-aliases and make an Ubuntu option
         """
-        response = client.describe_images(
+        response = self.client.describe_images(
             Filters=[
                 {
                     'Name': 'name',
@@ -63,10 +95,9 @@ class AWSHost:
     def _descibe_instance(self, host_from_response: dict):
         _app_name = None
         for tag in host_from_response['Tags']:
-            if tag['Key'] == C.DEFAULT_APP_NAME:
+            if tag['Key'] == QHC.DEFAULT_APP_NAME:
                 if tag['Value'] == self.app_name:
                     break
-
         return {
             'app_name': self.app_name,
             'ami': host_from_response['ImageId'],
@@ -85,7 +116,7 @@ class AWSHost:
         _instances = []
         _app_hosts = self.client.describe_instances(
             Filters=[
-                { 'Name': f"tag:{C.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
+                { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
             ],
             DryRun=False,
             MaxResults=10,
@@ -105,11 +136,10 @@ class AWSHost:
         _instances = []
         _app_hosts = self.client.describe_instances(
             Filters=[
-                { 'Name': f"tag:{C.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
+                { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
             ],
             DryRun=False,
-            MaxResults=10,
-            #NextToken='string'
+            MaxResults=100,
         )
         store_test_data(resource='AWSHost', action='describe', response_data=quickhost.convert_datetime_to_string(_app_hosts))
         for r in _app_hosts['Reservations']:
@@ -123,31 +153,31 @@ class AWSHost:
         return _instances
 
 
-    def create(self):
+    def create(self, num_hosts, instance_type, sgid, subnet_id, userdata, key_name, dry_run=False, image_id=AWS.DEFAULT_HOST_OS):
         ## this was moved from __init__ after causing describe() problems
-        if self.image_id is None:
+        if image_id is None:
             print("No ami specified, getting latest al2...", end='')
-            self.image_id = self.get_latest_image()
-            print("done ({self.ami})")
+            image_id = self.get_latest_image()
+            print("Done. ({image_id})")
         ##
         print(f"starting hosts...")
         _run_instances_params = {
-            'ImageId': self.image_id,
-            'InstanceType': self.instance_type,
-            'KeyName': self.key_name,
+            'ImageId': image_id,
+            'InstanceType': instance_type,
+            'KeyName': key_name,
             'Monitoring':{ 'Enabled': False },
-            'MaxCount':int(self.num_hosts),
+            'MaxCount':int(num_hosts),
             'MinCount':1,
             'DisableApiTermination':False,
-            'DryRun':self.dry_run,
+            'DryRun':dry_run,
             'InstanceInitiatedShutdownBehavior':'terminate',
             'NetworkInterfaces':[
                 {
                     'AssociatePublicIpAddress': True,
                     'DeviceIndex': 0,
-                    'SubnetId': self.subnet_id,
+                    'SubnetId': subnet_id,
                     'Groups': [
-                        self.sgid
+                        sgid
                     ],
                 }
             ],
@@ -155,12 +185,12 @@ class AWSHost:
                 {
                     'ResourceType': 'instance',
                     'Tags': [
-                        { 'Key': C.DEFAULT_APP_NAME, 'Value': self.app_name},
+                        { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name},
                     ]
                 },
             ],
         }
-        if self.userdata:
+        if userdata:
             _run_instances_params['UserData'] = self.get_userdata(userdata)
         response = self.client.run_instances(**_run_instances_params)
         r_cleaned = quickhost.convert_datetime_to_string(response)
@@ -182,7 +212,7 @@ class AWSHost:
             _other_hosts = []
             _app_hosts = quickhost.convert_datetime_to_string(self.client.describe_instances(
                 Filters=[
-                    { 'Name': f"tag:{C.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
+                    { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
                     { 'Name': f"instance-state-name", 'Values': ['pending', 'running'] },
                 ],
                 DryRun=False,
@@ -211,7 +241,7 @@ class AWSHost:
     def get_ssh(self):
         _app_hosts = self.client.describe_instances(
             Filters=[
-                { 'Name': f"tag:{C.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
+                { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
                 { 'Name': f"state", 'Values': ['running'] },
             ],
             DryRun=False,

@@ -10,15 +10,12 @@ import json
 import boto3
 
 import quickhost
-from quickhost import APP_CONST as C
+from quickhost import APP_CONST as QHC
 
-#from .utilities import get_my_public_ip
-#from .constants import *
-#from .cli_params import AppBase, AppConfigFileParser
 from .AWSSG import SG
 from .AWSHost import AWSHost
 from .AWSKeypair import KP
-from .AWSVpc import AWSVpc
+from .AWSInit import AWSInit
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +35,10 @@ class AWSApp(quickhost.AppBase):
     """
     def __init__(self, app_name, config_file=None):
         self._client = boto3.client('ec2')
+        self.ec2_resource = boto3.resource('ec2')
         self.config_file = config_file
         if config_file is None:
-            config_file = C.DEFAULT_CONFIG_FILEPATH
+            config_file = QHC.DEFAULT_CONFIG_FILEPATH
         super().__init__('aws', app_name, config_file)
         self._config_file_parser = quickhost.AppConfigFileParser()
         self._config_file_parser.read(self.config_file)
@@ -64,19 +62,21 @@ class AWSApp(quickhost.AppBase):
         - IAM
         """
         self._parse_init(args)
-        iam = boto3.client(
-            'iam',
-        )
-        sts = boto3.client(
-            'sts',
-        )
+        iam = boto3.client( 'iam',)
+        sts = boto3.client( 'sts',)
         caller_id = sts.get_caller_identity()
+        iam = boto3.client('iam')
+        username = quickhost.convert_datetime_to_string(iam.get_user())['User']['UserName']
+        user_id = quickhost.convert_datetime_to_string(iam.get_user())['User']['UserId']
+        acct = caller_id['Account']
+        
         caller_id.pop('ResponseMetadata')
-        inp = input(f"About to initialize quickhost for this user/account: \n{json.dumps(caller_id, indent=2)}\n\nContinue? (y/n)")
+        #logger.debug(json.dumps(caller_id, indent=2))
+        inp = input(f"About to initialize quickhost using:\nuser:\t\t{username} ({user_id})\naccount:\t{acct}\n\nContinue? (y/n)")
         if not inp.lower() == ('y' or 'yes'):
             print('Aborted')
             exit(3)
-        networking_params= AWSVpc(
+        networking_params= AWSInit(
             app_name=self.app_name,
             client=self._client,
         )
@@ -85,14 +85,13 @@ class AWSApp(quickhost.AppBase):
         #p = networking_params.get()
         print(p)
         return 
-        
 
-    def _all_cfg_key(self):
-        return f'{self._cli_parser_id}:all'
-    def _app_cfg_key(self):
-        return f'{self.app_name}:{self._cli_parser_id}'
+#    def _all_cfg_key(self):
+#        return f'{self._cli_parser_id}:all'
+#    def _app_cfg_key(self):
+#        return f'{self.app_name}:{self._cli_parser_id}'
     def load_default_config(self):
-        networking_params = AWSVpc(
+        networking_params = AWSInit(
             app_name=self.app_name,
             client=self._client,
         ).get()
@@ -189,15 +188,19 @@ class AWSApp(quickhost.AppBase):
             return 1
         elif args['__qhaction'] == 'destroy':
             print('destroy')
+            params = self._parse_destroy(args)
+            self.destroy(params)
             print("@@@ WIP")
             return 1
         else:
             raise Exception("should have printed help in main.py! Bug!")
 
     def _parse_init(self, args: dict):
-        flags = args.keys()
+        init_params = args
+        return init_params
     
     def _parse_make(self, args: dict):
+        make_params = {}
         flags = args.keys()
         # ports ingress
         if 'port' in flags:
@@ -211,8 +214,10 @@ class AWSApp(quickhost.AppBase):
                 except ValueError:
                     raise RuntimeError("port numbers must be digits")
             self.ports = ports
+            # @@@ todo: return make_params instead of using AWSApp() properties..?
+            make['ports'] = ports
         else:
-            self.ports = C.DEFAULT_OPEN_PORTS
+            self.ports = QHC.DEFAULT_OPEN_PORTS
         # cidrs ingress
         if args['ip'] is None:
             self.cidrs = [quickhost.get_my_public_ip()]
@@ -265,10 +270,14 @@ class AWSApp(quickhost.AppBase):
         return
         
     def _parse_destroy(self, args: dict):
+        destroy_params = {}
         flags = args.keys()
-        if 'dry_run' in flags:
-            self.dry_run = not ns.dry_run #NOT
-        self._client = boto3.client("ec2")
+        print(f"{flags=}")
+        return {
+            'app_name': self.app_name,
+            'config_file': self.config_file,
+            'dry_run': False,
+        }
 
     def _print_loaded_args(self, heading=None) -> None:
         """print the currently loaded app parameters"""
@@ -294,65 +303,78 @@ class AWSApp(quickhost.AppBase):
         return None
 
     def describe(self, args: dict) -> None:
-        print(self.vpc_id)
-        print(self.vpc_id)
+#        sts = boto3.client( 'sts',)
+#        caller_id = sts.get_caller_identity()
+#        print(json.dumps(caller_id, indent=2))
         self._parse_describe()
-        _sg = SG(
+        sg = SG(
             client=self._client,
+            ec2_resource=self.ec2_resource,
             app_name=self.app_name,
             vpc_id=self.vpc_id,
-            dry_run=False
+#            dry_run=False
         )
-        _kp = KP(
+        kp = KP(
             client=self._client,
+            ec2_resource=self.ec2_resource,
             app_name=self.app_name,
-            ssh_key_filepath=None,
-            dry_run=False
+#            ssh_key_filepath=None,
+#            dry_run=False
         )
-        _host = AWSHost(
+        host = AWSHost(
             client=self._client,
+            ec2_resource=self.ec2_resource,
             app_name=self.app_name,
-            num_hosts=self.num_hosts,
-            image_id=self.ami,
-            instance_type=self.instance_type,
-            subnet_id=self.subnet_id,
-            sgid=self.sgid,
-            userdata=self.userdata,
-            dry_run=False
+#            num_hosts=self.num_hosts,
+#            image_id=self.ami,
+#            instance_type=self.instance_type,
+#            subnet_id=self.subnet_id,
+#            sgid=self.sgid,
+#            userdata=self.userdata,
+#            dry_run=False
         )
-        _sg.describe()
+        sg.describe()
         self.sgid = _sg.sgid
-        self.kpid = _kp.get_key_id()
+        self.kpid = kp.get_key_id()
         self.ec2ids =  []
-        for inst in _host.describe():
+        for inst in host.describe():
             self.ec2ids.append(inst['instance_id'])
         self._print_loaded_args(heading=f"Params for app '{self.app_name}'")
 
     def create(self, args: dict):
-        self._parse_make(args)
-        _kp = KP(
+#        sts = boto3.client( 'sts',)
+#        caller_id = sts.get_caller_identity()
+#        print(json.dumps(caller_id, indent=2))
+        p = self._parse_make(args)
+        kp = KP(
             client=self._client,
+            ec2_resource=self.ec2_resource,
             app_name=self.app_name,
-            ssh_key_filepath=self.ssh_key_filepath,
-            dry_run=self.dry_run
+#            ssh_key_filepath=self.ssh_key_filepath,
+#            dry_run=self.dry_run
         )
-        _kp.create()
-        _sg = SG(
+        kp.create()
+        sg = SG(
             client=self._client,
+            ec2_resource=self.ec2_resource,
             app_name=self.app_name,
             vpc_id=self.vpc_id,
-            ports=args['port'],
-            cidrs=args['cidr'],
-            dry_run=self.dry_run,
         )
-        self.sgid = _sg.create()
+        self.sgid = sg.create(
+            ports=self.ports,
+            cidrs=self.cidrs
+#            dry_run=self.dry_run,
+        )
+        return
         if self.ami is None:
             print("No ami specified, getting latest al2...", end='')
             self.ami = AWSHost.get_latest_image(client=self._client)
             print(f"done ({self.ami})")
-        _host = AWSHost(
+        host = AWSHost(
             client=self._client,
+            ec2_resource=self.ec2_resource,
             app_name=self.app_name,
+        ).create(
             num_hosts=self.num_hosts,
             image_id=self.ami,
             instance_type=self.instance_type,
@@ -362,16 +384,44 @@ class AWSApp(quickhost.AppBase):
             userdata=self.userdata,
             dry_run=self.dry_run
         )
-        _host.create()
-        app_instances = _host.wait_for_hosts()
+        app_instances = host.wait_for_hosts()
         #_host.get_ssh()
         print('Done')
         print(app_instances)
 
     def update(self):
+#        sts = boto3.client( 'sts',)
+#        caller_id = sts.get_caller_identity()
+#        print(json.dumps(caller_id, indent=2))
         pass
 
-    def destroy(self):
-        pass
+    def destroy(self, args: dict):
+#        sts = boto3.client( 'sts',)
+#        caller_id = sts.get_caller_identity()
+#        print(json.dumps(caller_id, indent=2))
+        params = self._parse_destroy(args)
+        print(quickhost.convert_datetime_to_string(params))
+        kp = KP(
+            client=self._client,
+            ec2_resource=self.ec2_resource,
+            app_name=self.app_name,
+            # @@@ ...
+            #ssh_key_filepath=params['ssh_key_filepath'],
+        ).destroy()
+        sg = SG(
+            client=self._client,
+            ec2_resource=self.ec2_resource,
+            app_name=self.app_name,
+            vpc_id=self.vpc_id,
+        ).destroy()
+        return
+        hosts = AWSHost(
+            client=self._client,
+            ec2_resource=self.ec2_resource,
+            app_name=self.app_name,
+        ).destroy()
+
+        return 
+
 if __name__ == '__main__':
     pass

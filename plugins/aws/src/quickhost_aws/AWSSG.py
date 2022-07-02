@@ -3,11 +3,13 @@ from dataclasses import dataclass
 import logging
 import json
 
+import boto3
 import botocore.exceptions
 
 from .constants import *
 from .utilities import QH_Tag
-from .temp_data_collector import store_test_data
+#from .temp_data_collector import store_test_data
+from quickhost.temp_data_collector import store_test_data
 
 
 logger = logging.getLogger(__name__)
@@ -17,57 +19,66 @@ class AWSPort:
     pass
 
 class SG:
-    def __init__(self, client: any, app_name: str, vpc_id: str, ports: List[int], cidrs: List[str], dry_run: bool):
+    #def __init__(self, client: any, ec2_resource: any, app_name: str, vpc_id: str, ports: List[int], cidrs: List[str], dry_run: bool):
+    def __init__(self, client: any, ec2_resource: any, app_name: str, vpc_id: str):
         self.client = client
+        self.ec2 = ec2_resource
         self.app_name = app_name
         self.vpc_id = vpc_id
-        self.ports = None
-        self.cidrs = None
-        self.dry_run = dry_run
+#        self.ports = None
+#        self.cidrs = None
+#        self.dry_run = dry_run
         self.sgid = None
 
-    def get_security_group(self):
-        _dsg = None
+    def get_security_group_id(self) -> str:
+        logger.debug(f"{self.vpc_id=}")
+        dsg = None
         try:
-            _dsg = self.client.describe_security_groups(
-                GroupNames=[self.app_name],
+            dsg = self.client.describe_security_groups(
                 Filters=[
-                    {
-                        'Name': 'vpc-id',
-                        'Values': [ self.vpc_id, ]
-                    },
+                    { 'Name': 'vpc-id', 'Values': [ self.vpc_id, ] },
+                    { 'Name': 'group-name', 'Values': [ self.app_name, ] },
                 ],
             )
-        except botocore.exceptions.ClientError:
+        except botocore.exceptions.ClientError as e:
+            logger.debug(f"Could not get sg for app '{self.app_name}':\n{e}")
             return None
-        if len(_dsg['SecurityGroups']) > 1:
-            raise RuntimeError(f"More than 1 security group was found with the name '{self.app_name}': {_sg['GroupId'] for _sg in _dsg['SecurityGroups']}")
-        #store_test_data(resource='SG', action='describe', response_data=_dsg)
-        return _dsg['SecurityGroups'][0]['GroupId']
+        if len(dsg['SecurityGroups']) > 1:
+            raise RuntimeError(f"More than 1 security group was found with the name '{self.app_name}': {sg['GroupId'] for sg in dsg['SecurityGroups']}")
+        elif len(dsg['SecurityGroups']) < 1:
+            logger.debug(f"No security groups found for app '{self.app_name}'")
+            return None
 
-    def create(self, cidrs, ports):
+        #store_test_data(resource='SG', action='describe', response_data=_dsg)
+        return dsg['SecurityGroups'][0]['GroupId']
+
+    def create(self, cidrs, ports, dry_run=False):
         print('creating sg...', end='')
-        _sg = self.client.create_security_group(
+        sg = self.client.create_security_group(
             Description="Made by quickhost",
             GroupName=self.app_name,
             VpcId=self.vpc_id,
             TagSpecifications=[{ 'ResourceType': 'security-group',
                 'Tags': [
                     { 'Key': 'Name', 'Value': self.app_name },
-                    QH_Tag
+                    QH_Tag(self.app_name)
             ]}],
-            DryRun=self.dry_run
+            DryRun=dry_run
         )
-        print(f"done ({_sg['GroupId']})")
-        self.sgid = _sg['GroupId']
+        print(f"done ({sg['GroupId']})")
+        self.sgid = sg['GroupId']
         self._add_ingress(cidrs, ports)
         #store_test_data(resource='SG', action='create', response_data=_sg)
-        return _sg['GroupId']
+        return sg['GroupId']
 
-    def delete(self):
-        #store_test_data(resource='SG', action='create', response_data=_sg)
-
-        pass
+    def destroy(self):
+        sg_id = self.get_security_group_id()
+        if not sg_id:
+            logger.debug(f"No security group found for app '{self.app_name}'")
+            return None
+        self.client.delete_security_group( GroupId=sg_id)
+        print(f"deleting security group '{sg_id}'")
+        return
 
     def _add_ingress(self, cidrs, ports):
         print('adding sg ingress...', end='')
@@ -82,9 +93,9 @@ class SG:
         response = self.client.authorize_security_group_ingress(
             GroupId=self.sgid,
             IpPermissions=perms,
-            DryRun=self.dry_run,
+            DryRun=False
         )
-        print(f"done ({[i for i in self.cidrs]}:{[p for p in self.ports]})")
+        print(f"done ({[i for i in cidrs]}:{[p for p in ports]})")
         #store_test_data(resource='SG', action='_add_ingress', response_data=response)
 
     def describe(self):
@@ -98,9 +109,9 @@ class SG:
                     { 'Name': 'vpc-id', 'Values': [ self.vpc_id, ] },
                 ],
             )
+            print(f"{json.dumps(response, indent=2)=}")
+
             self.sgid = response['SecurityGroups'][0]['GroupId']
-            ec2 = boto3.resource('ec2')
-            sg = ec2.SecutiryGroup()
             for p in response['SecurityGroups'][0]['IpPermissions']:
                 if p['ToPort'] == p['FromPort']:
                     self.ports.append("{}/{}".format(
@@ -118,7 +129,7 @@ class SG:
             if 'InvalidGroup.NotFound' in e.response:
                 self.sgid = None
                 logger.error(f"No security group found for app '{self.app_name}' (does the app exist?)")
-        print(json.dumps(response, indent=2))
+        print(f"{json.dumps(response, indent=2)=}")
         exit(2)
         return response
 

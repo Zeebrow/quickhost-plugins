@@ -1,4 +1,5 @@
 import logging
+import json
 import shutil
 from pathlib import Path
 from tempfile import mkstemp
@@ -8,6 +9,9 @@ from botocore.exceptions import ClientError
 
 import quickhost
 from quickhost import APP_CONST as C
+from quickhost.temp_data_collector import store_test_data
+
+from .utilities import get_single_result_id
 #try:
 #    from .constants import *
 #except:
@@ -20,18 +24,37 @@ from quickhost import APP_CONST as C
 logger = logging.getLogger(__name__)
 
 class KP:
-    def __init__(self, client: any, app_name: str, ssh_key_filepath: str, key_name=None, dry_run=True):
+    #def __init__(self, client: any, ec2_resource: any, app_name: str, ssh_key_filepath=None, key_name=None, dry_run=True):
+    def __init__(self, client: any, ec2_resource: any, app_name: str):
         self.client = client
         self.app_name = app_name
-        self.ssh_key_filepath = ssh_key_filepath
-        self.dry_run = dry_run
-        self.key_name = key_name
-        if not self.key_name:
-            self.key_name = app_name
-        self._key_id = None
-        self._fingerprint = None
+        self.ec2 = ec2_resource
+        self.key_name = app_name 
+#        self.ssh_key_filepath = ssh_key_filepath
+#        self.dry_run = dry_run
+#        self.key_name = key_name
+#        if not self.key_name:
+#            self.key_name = app_name
+#        self.key_id = None
+#        self._fingerprint = None
 
-    def get_key_id(self) -> dict:
+    def get_key_id(self) -> str:
+        try:
+            existing_key = self.client.describe_key_pairs(
+                KeyNames=[
+                    self.app_name
+                ],
+                DryRun=False,
+                # @@@No idea why the docs differ so much from what I'm able to code
+                # It just means less copy-pasting, I suppose.
+                #IncludePublicKey=True
+            )
+        except ClientError as e: 
+            logger.debug(f"No key for app '{self.app_name}'?\n{e}")
+            return None
+        return get_single_result_id(resource=existing_key, resource_type='KeyPair', plural=True)
+        
+    def _get_key_id(self) -> dict:
         """
         call aws to get existing ec2 key
         returns None if the ex2 key does not exist
@@ -46,6 +69,7 @@ class KP:
                 # It just means less copy-pasting, I suppose.
                 #IncludePublicKey=True
             )
+            print(json.dumps(_existing_key, indent=2))
         except ClientError as e:
             if 'InvalidKeyPair.NotFound' in str(e):
                 # SG does not exist
@@ -65,24 +89,24 @@ class KP:
         #quickhost.store_test_data(resource='KP', action='get_key_id', response_data=_existing_key)
         return self.key_id
 
-    def create(self) -> dict:
+    def create(self, ssh_key_filepath=None) -> dict:
         """Make a new ec2 keypair named for app"""
         print('creating ec2 key pair...', end='')
-        if self.ssh_key_filepath is None:
+        if ssh_key_filepath is None:
             # not overriden from config, set default
             tgt_file = Path(f"./{self.app_name}.pem")
         else:
-            if not self.ssh_key_filepath.endswith('.pem'):
-                tgt_file = Path(f"{self.ssh_key_filepath}.pem")
+            if not ssh_key_filepath.endswith('.pem'):
+                tgt_file = Path(f"{ssh_key_filepath}.pem")
             else:
-                tgt_file = Path(self.ssh_key_filepath)
+                tgt_file = Path(ssh_key_filepath)
         if tgt_file.exists():
             logger.error(f"pem file '{tgt_file.absolute()}' already exists")
             exit(1)
 
         _new_key = self.client.create_key_pair(
             KeyName=self.key_name,
-            DryRun=self.dry_run,
+            DryRun=False,
             KeyType='rsa',
             TagSpecifications=[
                 {
@@ -145,18 +169,21 @@ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
         return self.key_id
 
     def destroy(self) -> bool:
-        if self._id is None:
-            self._id = self.get_key_pair()['KeyPairId']
+        key_id = self.get_key_id()
+        if not key_id:
+            logger.debug(f"No key for app '{self.app_name}'")
+            return False
         try:
-            _del_key = self.client.delete_key_pair(
+            del_key = self.client.delete_key_pair(
                 KeyName=self.app_name,
-                KeyPairId=self._id,
-                DryRun=self.dry_run
+                KeyPairId=key_id,
+                DryRun=False
             )
+            print(f"{del_key=}")
             #quickhost.store_test_data(resource='KP', action='destroy', response_data=_del_key)
             return True
         except ClientError as e:
-            logger.warning(f"failed to delete keypair for app '{self.app_name}' (id: '{self._id}'):\n {e}")
+            logger.warning(f"failed to delete keypair for app '{self.app_name}' (id: '{key_id}'):\n {e}")
             return False
 
     def update(self):
