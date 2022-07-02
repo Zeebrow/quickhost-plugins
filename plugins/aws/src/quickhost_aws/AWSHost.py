@@ -21,27 +21,31 @@ class AWSHost:
         self.client = client
         self.ec2 = ec2_resource
         self.app_name=app_name
-        return 
-        self.num_hosts=num_hosts
-        self.image_id=image_id
-        self.instance_type=instance_type
-        self.sgid=sgid
-        self.subnet_id=subnet_id
-        self.key_name = key_name
-        if key_name is None:
-            self.key_name = app_name
-        self.userdata=userdata
-        self.dry_run=dry_run
-        self.app_instances = []
+#        return 
+#        self.num_hosts=num_hosts
+#        self.image_id=image_id
+#        self.instance_type=instance_type
+#        self.sgid=sgid
+#        self.subnet_id=subnet_id
+#        self.key_name = key_name
+#        if key_name is None:
+#            self.key_name = app_name
+#        self.userdata=userdata
+#        self.dry_run=dry_run
+#        self.app_instances = []
 
     def destroy(self):
         instance_ids = self.get_instance_ids()
         print(f"{instance_ids=}")
         #self.describe()
         instances = []
+        print(instance_ids)
         for i in instance_ids:
-            instances.append(self.ec2.Instance(self.instance_id))
-        print(len(instances))
+            instances.append(i['instance-id'])
+        print(instances)
+        self.client.terminate_instances(
+            InstanceIds=instances
+        )
 
 
     def get_instance_ids(self, state_list=['running', 'starting']) -> List[str]:
@@ -62,19 +66,17 @@ class AWSHost:
             for host in r['Instances']:
                 if host['State']['Name'] in state_list:
                     running_instances.append({'instance-id': host['InstanceId'], 'state': host['State']['Name']})
-                    inst = self._descibe_instance(inst=host)
+                    inst = self._descibe_instance(host_from_response=host)
                     continue
         return running_instances
 
-
-
     @classmethod
-    def get_latest_image(self, os=QHC.DEFAULT_APP_NAME):
+    def get_latest_image(self, client, os=QHC.DEFAULT_APP_NAME):
         """
         Get the latest amazon linux 2 ami
         TODO: see source-aliases and make an Ubuntu option
         """
-        response = self.client.describe_images(
+        response = client.describe_images(
             Filters=[
                 {
                     'Name': 'name',
@@ -88,7 +90,6 @@ class AWSHost:
             IncludeDeprecated=False,
             DryRun=False
         )
-
         sortedimages = sorted(response['Images'], key=lambda x: datetime.strptime(x['CreationDate'], '%Y-%m-%dT%H:%M:%S.%fZ'))
         return sortedimages[-1]['ImageId']
 
@@ -110,9 +111,8 @@ class AWSHost:
             '_platform': host_from_response['PlatformDetails'],
         }
 
-
     def get_hosts_for_app(self, app_name: str):
-        """Given the app_name, returns the instance id off all instances with a State of 'running'"""
+        """Given the app_name, returns a list of instance ids for a particular app, where the instance state is 'running'"""
         _instances = []
         _app_hosts = self.client.describe_instances(
             Filters=[
@@ -128,7 +128,7 @@ class AWSHost:
             for host in r['Instances']:
                 if host['State']['Name'] in ['running', 'starting']:
                     _instances.append({'instance-id': host['InstanceId'], 'state': host['State']['Name']})
-                    inst = self._descibe_instance(inst=host)
+                    inst = self._descibe_instance(host_from_response=host)
                     continue
         return _instances
 
@@ -203,7 +203,7 @@ class AWSHost:
             data = ud.read()
         return data
 
-    def wait_for_hosts(self):
+    def wait_for_hosts(self, num_hosts):
         """'blocks' until a the specified hosts tagged as 'app_name' have a State Name of 'running'"""
         print(f"===================Waiting on hosts for '{self.app_name}'=========================")
         while True:
@@ -230,8 +230,8 @@ class AWSHost:
                     else:
                         if not (host['InstanceId'] in _other_hosts):
                             _other_hosts.append(host['InstanceId'])
-            print(f"""({len(_running_hosts)}/{self.num_hosts}) Running: {_running_hosts} Waiting ({len(_waiting_on_hosts)}): {[l for l in _waiting_on_hosts]}\r""", end='')
-            if self.num_hosts == len(_running_hosts):
+            print(f"""({len(_running_hosts)}/{num_hosts}) Running: {_running_hosts} Waiting ({len(_waiting_on_hosts)}): {[l for l in _waiting_on_hosts]}\r""", end='')
+            if num_hosts == len(_running_hosts):
                 print()
                 break
             time.sleep(1)

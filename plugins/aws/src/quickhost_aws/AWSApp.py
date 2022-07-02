@@ -35,7 +35,7 @@ class AWSApp(quickhost.AppBase):
     """
     def __init__(self, app_name, config_file=None):
         self._client = boto3.client('ec2')
-        self.ec2_resource = boto3.resource('ec2')
+        self._ec2_resource = boto3.resource('ec2')
         self.config_file = config_file
         if config_file is None:
             config_file = QHC.DEFAULT_CONFIG_FILEPATH
@@ -309,33 +309,25 @@ class AWSApp(quickhost.AppBase):
         self._parse_describe()
         sg = SG(
             client=self._client,
-            ec2_resource=self.ec2_resource,
+            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
             vpc_id=self.vpc_id,
-#            dry_run=False
         )
+        sg.describe()
         kp = KP(
             client=self._client,
-            ec2_resource=self.ec2_resource,
+            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
-#            ssh_key_filepath=None,
-#            dry_run=False
         )
         host = AWSHost(
             client=self._client,
-            ec2_resource=self.ec2_resource,
+            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
-#            num_hosts=self.num_hosts,
-#            image_id=self.ami,
-#            instance_type=self.instance_type,
-#            subnet_id=self.subnet_id,
-#            sgid=self.sgid,
-#            userdata=self.userdata,
-#            dry_run=False
         )
-        sg.describe()
-        self.sgid = _sg.sgid
+        self.sgid = sg.sgid
         self.kpid = kp.get_key_id()
+        print(f"{self.sgid=}")
+        print(f"{self.kpid=}")
         self.ec2ids =  []
         for inst in host.describe():
             self.ec2ids.append(inst['instance_id'])
@@ -348,7 +340,7 @@ class AWSApp(quickhost.AppBase):
         p = self._parse_make(args)
         kp = KP(
             client=self._client,
-            ec2_resource=self.ec2_resource,
+            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
 #            ssh_key_filepath=self.ssh_key_filepath,
 #            dry_run=self.dry_run
@@ -356,7 +348,7 @@ class AWSApp(quickhost.AppBase):
         kp.create()
         sg = SG(
             client=self._client,
-            ec2_resource=self.ec2_resource,
+            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         )
@@ -365,16 +357,16 @@ class AWSApp(quickhost.AppBase):
             cidrs=self.cidrs
 #            dry_run=self.dry_run,
         )
-        return
-        if self.ami is None:
-            print("No ami specified, getting latest al2...", end='')
-            self.ami = AWSHost.get_latest_image(client=self._client)
-            print(f"done ({self.ami})")
         host = AWSHost(
             client=self._client,
-            ec2_resource=self.ec2_resource,
+            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
-        ).create(
+        )
+        if self.ami is None:
+            print("No ami specified, getting latest al2...", end='')
+            self.ami = AWSHost.get_latest_image(self._client)
+            print(f"done ({self.ami})")
+        host.create(
             num_hosts=self.num_hosts,
             image_id=self.ami,
             instance_type=self.instance_type,
@@ -388,6 +380,7 @@ class AWSApp(quickhost.AppBase):
         #_host.get_ssh()
         print('Done')
         print(app_instances)
+        return
 
     def update(self):
 #        sts = boto3.client( 'sts',)
@@ -403,24 +396,23 @@ class AWSApp(quickhost.AppBase):
         print(quickhost.convert_datetime_to_string(params))
         kp = KP(
             client=self._client,
-            ec2_resource=self.ec2_resource,
+            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
             # @@@ ...
             #ssh_key_filepath=params['ssh_key_filepath'],
         ).destroy()
-        sg = SG(
-            client=self._client,
-            ec2_resource=self.ec2_resource,
-            app_name=self.app_name,
-            vpc_id=self.vpc_id,
-        ).destroy()
-        return
         hosts = AWSHost(
             client=self._client,
-            ec2_resource=self.ec2_resource,
+            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
         ).destroy()
 
+        sg = SG(
+            client=self._client,
+            ec2_resource=self._ec2_resource,
+            app_name=self.app_name,
+            vpc_id=self.vpc_id,
+        ).destroy()
         return 
 
 if __name__ == '__main__':

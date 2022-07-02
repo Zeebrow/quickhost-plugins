@@ -28,7 +28,7 @@ class SG:
 #        self.ports = None
 #        self.cidrs = None
 #        self.dry_run = dry_run
-        self.sgid = None
+        self.sgid = self.get_security_group_id()
 
     def get_security_group_id(self) -> str:
         logger.debug(f"{self.vpc_id=}")
@@ -100,26 +100,27 @@ class SG:
 
     def describe(self):
         response = None
-        self.ports = []
-        self.cirds = []
+        ports = []
+        cidrs = []
         try:
             response = self.client.describe_security_groups(
-                GroupNames=[self.app_name],
                 Filters=[
                     { 'Name': 'vpc-id', 'Values': [ self.vpc_id, ] },
+                    { 'Name': 'group-name', 'Values': [ self.app_name, ] },
                 ],
             )
-            print(f"{json.dumps(response, indent=2)=}")
-
             self.sgid = response['SecurityGroups'][0]['GroupId']
             for p in response['SecurityGroups'][0]['IpPermissions']:
+                for ipr in p['IpRanges']:
+                    cidrs.append(ipr['CidrIp'])
+
                 if p['ToPort'] == p['FromPort']:
-                    self.ports.append("{}/{}".format(
+                    ports.append("{}/{}".format(
                         p['ToPort'],
                         p['IpProtocol']
                     ))
                 else:
-                    self.ports.append("{0}/{2}-{1}/{2}".format(
+                    ports.append("{0}/{2}-{1}/{2}".format(
                         p['ToPort'],
                         p['FromPort'],
                         p['IpProtocol']
@@ -129,8 +130,11 @@ class SG:
             if 'InvalidGroup.NotFound' in e.response:
                 self.sgid = None
                 logger.error(f"No security group found for app '{self.app_name}' (does the app exist?)")
-        print(f"{json.dumps(response, indent=2)=}")
-        exit(2)
+        #print(json.dumps(response['SecurityGroups'][0], indent=2))
+        logger.debug(f"{ports=}")
+        logger.debug(f"{cidrs=}")
+        for ip in cidrs:
+            print(f"{ip}:{[p for p in ports]}")
         return response
 
 if __name__ == '__main__':
