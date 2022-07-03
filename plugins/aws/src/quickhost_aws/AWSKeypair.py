@@ -22,6 +22,7 @@ class KP:
         self.app_name = app_name
         self.ec2 = ec2_resource
         self.key_name = app_name 
+        self.key_filepath = C.DEFAULT_SSH_KEY_FILE_DIR / f"{self.key_name}.pem"
 
     def get_key_id(self) -> str:
         try:
@@ -64,7 +65,7 @@ class KP:
                 {
                     'ResourceType': 'key-pair',
                     'Tags': [
-                        { 'Key': C.DEFAULT_APP_NAME, 'Value': self.app_name},
+                        { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name},
                     ]
                 },
             ],
@@ -93,9 +94,18 @@ class KP:
             key_id = existing_key['KeyPairs'][0]['KeyPairId']
             fingerprint = existing_key['KeyPairs'][0]['KeyFingerprint']
         except ClientError as e:
-            logger.debug(f"Key for app '{self.app_name}' does not exist.")
-            key_id = None
-            fingerprint = None
+            if e.response['Error']['Code'] == 'UnauthorizedOperation':
+                logger.error(f"Unauthorized to get EC2 key pair info.")
+                return {
+                    'key_id': '?',
+                    'key_fingerprint': '?'
+                }
+            else:
+                logger.error(f"(Key Pair) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
+                return {
+                    'key_id': None,
+                    'fingerprint': None
+                }
         return {
                 'key_id': key_id,
                 'key_fingerprint': fingerprint

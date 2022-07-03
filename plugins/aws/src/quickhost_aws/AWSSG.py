@@ -130,35 +130,32 @@ class SG:
                     ))
 
         except botocore.exceptions.ClientError as e:
-            if 'InvalidGroup.NotFound' in e.response:
+            if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
                 self.sgid = None
                 logger.error(f"No security group found for app '{self.app_name}' (does the app exist?)")
-        #print(json.dumps(response['SecurityGroups'][0], indent=2))
-        logger.debug(f"{ports=}")
-        logger.debug(f"{cidrs=}")
+                return {
+                    'sgid': None,
+                    'ports': [None],
+                    'cidrs': [None],
+                }
+            if e.response['Error']['Code'] == 'UnauthorizedOperation':
+                logger.error(f"Unauthorized to get security group info.")
+                return {
+                    'sgid': '?',
+                    'ports': ['?'],
+                    'cidrs': ['?'],
+                }
+            else:
+                logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
+                return {
+                    'sgid': None,
+                    'ports': [None],
+                    'cidrs': [None],
+                }
         for ip in cidrs:
             print(f"{ip}:{[p for p in ports]}")
-        #return response
         return {
+            'sgid': self.sgid,
             'ports': ports,
             'cidrs': cidrs
         }
-
-if __name__ == '__main__':
-    import boto3
-    import json
-    try:
-        from .utilities import get_my_public_ip
-    except:
-        from utilities import get_my_public_ip
-
-    client = boto3.client('ec2')
-    sg = SG(
-        client=client,
-        app_name='test-sg',
-        vpc_id='vpc-7c31a606',
-        ports=['22'],
-        cidrs=[f"{get_my_public_ip()}/32"],
-        dry_run=False
-    )
-    print(json.dumps(sg.describe(), indent=2))

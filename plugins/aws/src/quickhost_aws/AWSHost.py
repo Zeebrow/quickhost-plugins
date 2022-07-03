@@ -51,9 +51,9 @@ class AWSHost:
         self.app_name=app_name
         self.host_count = None
 
+
     def create(self, num_hosts, instance_type, sgid, subnet_id, userdata, key_name, dry_run=False, image_id=AWS.DEFAULT_HOST_OS):
-        ## this was moved from __init__ after causing describe() problems
-        self.get_host_count()
+        self.host_count = num_hosts
         if self.get_host_count() > 0:
             logger.error(f"Hosts for app '{self.app_name}' already exist")
             return False
@@ -95,20 +95,35 @@ class AWSHost:
 
     def describe(self):
         instances = []
-        app_hosts = self.client.describe_instances(
-            Filters=[
-                { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
-                { 'Name': 'instance-state-name', 'Values': [HostState.running, HostState.pending]},
-            ],
-            DryRun=False,
-            MaxResults=10,
-        )
-        store_test_data(resource='AWSHost', action='describe', response_data=quickhost.convert_datetime_to_string(app_hosts))
-        for r in app_hosts['Reservations']:
-            for host in r['Instances']:
-                if host['State']['Name'] in ['running', 'pending']:
-                    instances.append(self._descibe_instance(host=host))
-        self.app_instances = instances
+        try: 
+            app_hosts = self.client.describe_instances(
+                Filters=[
+                    { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
+                    { 'Name': 'instance-state-name', 'Values': [HostState.running, HostState.pending]},
+                ],
+                DryRun=False,
+                MaxResults=10,
+            )
+            store_test_data(resource='AWSHost', action='describe', response_data=quickhost.convert_datetime_to_string(app_hosts))
+            for r in app_hosts['Reservations']:
+                for host in r['Instances']:
+                    if host['State']['Name'] in ['running', 'pending']:
+                        instances.append(self._descibe_instance(host=host))
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'UnauthorizedOperation':
+                logger.error(f"Unauthorized to get security group info.")
+                return [self._descibe_instance({
+                    'State': {
+                        'Name': ['?'],
+                    }
+                }, none_val='?')]
+            else:
+                logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
+                return [self._descibe_instance({
+                    'State': {
+                        'Name': [None],
+                    }
+                })]
         return instances
 
     def destroy(self):
@@ -175,10 +190,13 @@ class AWSHost:
         sortedimages = sorted(response['Images'], key=lambda x: datetime.strptime(x['CreationDate'], '%Y-%m-%dT%H:%M:%S.%fZ'))
         return sortedimages[-1]['ImageId']
 
-    def _descibe_instance(self, host: dict):
-        noneval = None
+    def _descibe_instance(self, host: dict, none_val=None):
+        """
+        get the pertinent data to one of the hosts in an app
+        If a property cannot be retrieved, it will be replaced with `none_val`.
+        """
+        none_val = None
         _try_get_attr = lambda d,attr: noneval if not attr in d.keys() else d[attr]
-
         return {
             'app_name': self.app_name,
             'ami': _try_get_attr(host,'ImageId'),
@@ -190,17 +208,6 @@ class AWSHost:
             '_state': host['State']['Name'],
             '_platform': _try_get_attr(host,'PlatformDetails'),
         }
-#        return {
-#            'app_name': self.app_name,
-#            'ami': host_from_response['ImageId'],
-#            'instance_id': host_from_response['InstanceId'],
-#            'instance_type': host_from_response['InstanceType'],
-#            'public_ip': host_from_response['PublicIpAddress'],
-#            'subnet_id': host_from_response['SubnetId'],
-#            'vpc_id': host_from_response['VpcId'],
-#            '_state': host_from_response['State']['Name'],
-#            '_platform': host_from_response['PlatformDetails'],
-#        }
 
     def get_userdata(self, filename: str):
         data=None
@@ -209,27 +216,21 @@ class AWSHost:
         return data
 
     def get_host_count(self):
-        if self.host_count is not None:
-            logger.debug(f"got self.host_count")
-            return self.host_count 
-        else:
-            app_hosts = quickhost.convert_datetime_to_string(self.client.describe_instances(
-                Filters=[
-                    { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
-                    { 'Name': f"instance-state-name", 'Values': [HostState.running] },
-                ],
-                DryRun=False,
-                MaxResults=10,
-            ))
-            count = 0
-            print(f"{len(app_hosts['Reservations'])=}")
-            for r in app_hosts['Reservations']:
-                logger.debug(f"got {len(r['Instances'])} instances")
-                for i,host in enumerate(r['Instances']):
-                    if host['State']['Name'] == HostState.running:
-                        count += 1
-
-            return count
+        app_hosts = quickhost.convert_datetime_to_string(self.client.describe_instances(
+            Filters=[
+                { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
+                { 'Name': f"instance-state-name", 'Values': [HostState.running] },
+            ],
+            DryRun=False,
+            MaxResults=10,
+        ))
+        count = 0
+        for r in app_hosts['Reservations']:
+            logger.debug(f"got {len(r['Instances'])} instances")
+            for i,host in enumerate(r['Instances']):
+                if host['State']['Name'] == HostState.running:
+                    count += 1
+        return count
         
     def wait_for_hosts_to_terminate(self, tgt_instances):
         """'blocks' until a the specified hosts tagged as 'app_name' have a State Name of 'running'"""
@@ -239,8 +240,7 @@ class AWSHost:
         waiting_on_hosts = []
         other_hosts = []
         tgt_count = len(tgt_instances)
-        done = False
-        while not done:
+        while not True:
             app_hosts = quickhost.convert_datetime_to_string(self.client.describe_instances(
                 Filters=[
                     { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
@@ -266,9 +266,9 @@ class AWSHost:
             print(f"""({len(ready_hosts)}/{tgt_count}) Ready ({len(ready_hosts)}): {ready_hosts} Waiting: ({len(waiting_on_hosts)}): {[l for l in waiting_on_hosts]}\r""", end='')
             if tgt_count == len(ready_hosts):
                 print()
-                return done
+                return True
             time.sleep(1)
-        return done
+        return False
 
     def wait_for_hosts_to_start(self, tgt_count):
         """'blocks' until a the specified hosts tagged as 'app_name' have a State Name of 'running'"""
@@ -277,8 +277,7 @@ class AWSHost:
         ready_hosts = []
         waiting_on_hosts = []
         other_hosts = []
-        done = False
-        while not done:
+        while True:
             app_hosts = quickhost.convert_datetime_to_string(self.client.describe_instances(
                 Filters=[
                     { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
@@ -303,18 +302,7 @@ class AWSHost:
             print(f"""({len(ready_hosts)}/{tgt_count}) Ready: {ready_hosts} Waiting: ({len(waiting_on_hosts)}): {[l for l in waiting_on_hosts]}\r""", end='')
             if tgt_count == len(ready_hosts):
                 print()
-                return done
+                return True
             time.sleep(1)
-        return done
+        return False
 
-    def get_ssh(self):
-        _app_hosts = self.client.describe_instances(
-            Filters=[
-                { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
-                { 'Name': f"state", 'Values': ['running'] },
-            ],
-            DryRun=False,
-            MaxResults=10,
-        )
-        print(f"ssh -i {self.key_name} ec2-user@{_app_hosts['PublicIpAddress']}")
-        

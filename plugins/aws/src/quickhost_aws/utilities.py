@@ -33,20 +33,24 @@ def get_single_result_id(resource_type, resource, plural=True):
     return None
 
 def check_running_as_user(tgt_user_name=AWSConstants.DEFAULT_IAM_USER):
-        sts = boto3.client( 'sts',)
-        caller_id = sts.get_caller_identity()
-        iam = boto3.client('iam')
+    sts = boto3.client( 'sts',)
+    caller_id = sts.get_caller_identity()
+    iam = boto3.client('iam')
 
-        all_users = iam.list_users()
-        running_as_user_id = caller_id['UserId']
-        running_as_user = ''
-        for u in all_users['Users']:
-            if u['UserId'] == running_as_user_id:
-                running_as_user = u['UserName']
-                break
+    all_users = iam.list_users()
+    running_as_user_id = caller_id['UserId']
+    running_as_user = ''
+    for u in all_users['Users']:
+        if u['UserId'] == running_as_user_id:
+            running_as_user = u['UserName']
+            break
 
-        tgt_user_id = iam.get_user(UserName=tgt_user_name)['User']['UserId']
-        if running_as_user_id != tgt_user_id:
-            logger.warning(f"You're running as the IAM user '{running_as_user}', not '{tgt_user_name}'!")
-            return False
-        return True
+    tgt_user_id = iam.get_user(UserName=tgt_user_name)['User']['UserId']
+    if running_as_user_id != tgt_user_id:
+        logger.warning(f"You're running as the IAM user '{running_as_user}', not '{tgt_user_name}'!")
+        return False
+    return True
+
+def get_ssh(key_filepath, ip, username='ec2-user'):
+    print(f"ssh -i {key_filepath} {username}@{ip}")
+    

@@ -17,7 +17,7 @@ from .AWSHost import AWSHost
 from .AWSKeypair import KP
 from .AWSInit import AWSInit
 from .constants import AWSConstants
-from .utilities import check_running_as_user
+from .utilities import check_running_as_user, get_ssh
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +324,22 @@ class AWSApp(quickhost.AppBase):
 
     def describe(self, args: dict) -> None:
         self._parse_describe()
+
+        sts = boto3.client( 'sts',)
+        caller_id = sts.get_caller_identity()
+        iam = boto3.client('iam')
+        all_users = iam.list_users()
+        running_as_user_id = caller_id['UserId']
+        running_as_user = ''
+        for u in all_users['Users']:
+            if u['UserId'] == running_as_user_id:
+                running_as_user = u['UserName']
+                break
+        iam_vals = {
+            "invoking_user_name": running_as_user,
+            "invoking_user_id": running_as_user_id,
+        }
+
         sg = SG(
             client=self._client,
             ec2_resource=self._ec2_resource,
@@ -347,6 +363,9 @@ class AWSApp(quickhost.AppBase):
         print(json.dumps(sg_vals,indent=2))
         print(json.dumps(kp_vals,indent=2))
         print(json.dumps(host_vals,indent=2))
+        print(json.dumps(iam_vals,indent=2))
+        for h in host_vals:
+            get_ssh(kp_vals['key_filepath'], h['public_ip'])
         #self._print_loaded_args(heading=f"Params for app '{self.app_name}'")
 
     def create(self, args: dict):
@@ -355,7 +374,6 @@ class AWSApp(quickhost.AppBase):
             client=self._client,
             ec2_resource=self._ec2_resource,
             app_name=self.app_name,
-#            ssh_key_filepath=self.ssh_key_filepath,
 #            dry_run=self.dry_run
         )
         kp.create()
