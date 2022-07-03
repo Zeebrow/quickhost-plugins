@@ -12,14 +12,6 @@ from quickhost import APP_CONST as C
 from quickhost.temp_data_collector import store_test_data
 
 from .utilities import get_single_result_id
-#try:
-#    from .constants import *
-#except:
-#    from constants import *
-#try:
-#    from .temp_data_collector import store_test_data
-#except:
-#    from temp_data_collector import store_test_data
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +22,6 @@ class KP:
         self.app_name = app_name
         self.ec2 = ec2_resource
         self.key_name = app_name 
-#        self.ssh_key_filepath = ssh_key_filepath
-#        self.dry_run = dry_run
-#        self.key_name = key_name
-#        if not self.key_name:
-#            self.key_name = app_name
-#        self.key_id = None
-#        self._fingerprint = None
 
     def get_key_id(self) -> str:
         try:
@@ -49,16 +34,18 @@ class KP:
                 # It just means less copy-pasting, I suppose.
                 #IncludePublicKey=True
             )
+            print(f"=====> {existing_key=}")
         except ClientError as e: 
             logger.debug(f"No key for app '{self.app_name}'?\n{e}")
             return None
         return get_single_result_id(resource=existing_key, resource_type='KeyPair', plural=True)
         
-    def create(self, ssh_key_filepath=None) -> dict:
+    def create(self, ssh_key_filepath=None):
         """Make a new ec2 keypair named for app"""
         print('creating ec2 key pair...', end='')
         if ssh_key_filepath is None:
             # not overriden from config, set default
+            # @@@ just use ~/.ssh...
             tgt_file = Path(f"./{self.app_name}.pem")
         else:
             if not ssh_key_filepath.endswith('.pem'):
@@ -67,9 +54,9 @@ class KP:
                 tgt_file = Path(ssh_key_filepath)
         if tgt_file.exists():
             logger.error(f"pem file '{tgt_file.absolute()}' already exists")
-            exit(1)
+            return False
 
-        _new_key = self.client.create_key_pair(
+        new_key = self.client.create_key_pair(
             KeyName=self.key_name,
             DryRun=False,
             KeyType='rsa',
@@ -81,57 +68,38 @@ class KP:
                     ]
                 },
             ],
-            # @@@Why is this param throwing errors, can't be shitty docs...
-            #KeyFormat='pem'
         )
 
-        # save pem
         with tgt_file.open('w') as pemf:
-            pemf.writelines(_new_key['KeyMaterial'])
+            pemf.writelines(new_key['KeyMaterial'])
         if sys.platform == 'linux':
-            # shoutout for the 'o'
-            # https://stackoverflow.com/questions/16249440/changing-file-permission-in-python
             os.chmod(tgt_file.absolute(), 0o600)
-        else:
-            logger.warning(f"unsupported platform '{sys.platform}'")
-            logger.warning(f"you may have to manage ssh key permissions yourself to login successfully.")
-        logger.info(f"saved private key to file '{tgt_file.absolute()}'")
-        self.key_id = _new_key['KeyPairId']
-        self._fingerprint = _new_key['KeyFingerprint']
-        _testdata = _new_key
-        if 'KeyMaterial' in _testdata.keys():
-            _testdata['KeyMaterial'] = """ -----BEGIN RSA PRIVATE KEY-----
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
------END RSA PRIVATE KEY-----
-"""
-        #quickhost.store_test_data(resource='KP', action='get_key_id', response_data=_testdata)
-        del _new_key
+        logger.debug(f"saved private key to file '{tgt_file.absolute()}'")
+        self.key_id = new_key['KeyPairId']
+        self.fingerprint = new_key['KeyFingerprint']
+        del new_key
         print(f"done ({self.key_id})")
-        return self.key_id
+        return
+
+    def describe(self):
+        try:
+            existing_key = self.client.describe_key_pairs(
+                KeyNames=[ self.app_name ],
+                DryRun=False,
+                # @@@The docs clearly show this param: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Client.describe_key_pairs
+                # but it throws an error
+                IncludePublicKey=True
+            )
+            key_id = existing_key['KeyPairs'][0]['KeyPairId']
+            fingerprint = existing_key['KeyPairs'][0]['KeyFingerprint']
+        except ClientError as e:
+            logger.debug(f"Key for app '{self.app_name}' does not exist.")
+            key_id = None
+            fingerprint = None
+        return {
+                'key_id': key_id,
+                'key_fingerprint': fingerprint
+        }
 
     def destroy(self, ssh_key_file=None) -> bool:
         if not ssh_key_file:
@@ -161,20 +129,6 @@ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
     def update(self):
         """Not implemented"""
         pass
-
-    def describe(self):
-        _existing_key = self.client.describe_key_pairs(
-            KeyNames=[
-                self.app_name
-            ],
-            DryRun=False,
-            # @@@The docs clearly show this param: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Client.describe_key_pairs
-            # but it throws an error
-            IncludePublicKey=True
-        )
-        self.key_id = _existing_key['KeyPairs'][0]['KeyPairId']
-        self._fingerprint = _existing_key['KeyPairs'][0]['KeyFingerprint']
-        return _existing_key
 
 
 if __name__ == '__main__':

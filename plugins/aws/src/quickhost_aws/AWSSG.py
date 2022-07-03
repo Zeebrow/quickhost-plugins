@@ -28,10 +28,8 @@ class SG:
 #        self.ports = None
 #        self.cidrs = None
 #        self.dry_run = dry_run
-        self.sgid = self.get_security_group_id()
 
     def get_security_group_id(self) -> str:
-        logger.debug(f"{self.vpc_id=}")
         dsg = None
         try:
             dsg = self.client.describe_security_groups(
@@ -54,17 +52,22 @@ class SG:
 
     def create(self, cidrs, ports, dry_run=False):
         print('creating sg...', end='')
-        sg = self.client.create_security_group(
-            Description="Made by quickhost",
-            GroupName=self.app_name,
-            VpcId=self.vpc_id,
-            TagSpecifications=[{ 'ResourceType': 'security-group',
-                'Tags': [
-                    { 'Key': 'Name', 'Value': self.app_name },
-                    QH_Tag(self.app_name)
-            ]}],
-            DryRun=dry_run
-        )
+        try:
+            sg = self.client.create_security_group(
+                Description="Made by quickhost",
+                GroupName=self.app_name,
+                VpcId=self.vpc_id,
+                TagSpecifications=[{ 'ResourceType': 'security-group',
+                    'Tags': [
+                        { 'Key': 'Name', 'Value': self.app_name },
+                        QH_Tag(self.app_name)
+                ]}],
+                DryRun=dry_run
+            )
+        except botocore.exceptions.ClientError as e:
+            logger.debug(f"Security Group already exists for '{self.app_name}':\n{e}")
+            logger.debug(f"{self.get_security_group_id()=}")
+            return self.get_security_group_id()
         print(f"done ({sg['GroupId']})")
         self.sgid = sg['GroupId']
         self._add_ingress(cidrs, ports)
@@ -135,7 +138,11 @@ class SG:
         logger.debug(f"{cidrs=}")
         for ip in cidrs:
             print(f"{ip}:{[p for p in ports]}")
-        return response
+        #return response
+        return {
+            'ports': ports,
+            'cidrs': cidrs
+        }
 
 if __name__ == '__main__':
     import boto3

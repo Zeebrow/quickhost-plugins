@@ -10,12 +10,14 @@ import json
 import boto3
 
 import quickhost
-from quickhost import APP_CONST as QHC
+from quickhost import APP_CONST as QHC, QHExit
 
 from .AWSSG import SG
 from .AWSHost import AWSHost
 from .AWSKeypair import KP
 from .AWSInit import AWSInit
+from .constants import AWSConstants
+from .utilities import check_running_as_user
 
 logger = logging.getLogger(__name__)
 
@@ -168,32 +170,36 @@ class AWSApp(quickhost.AppBase):
         Subsequently calls an appropriate AWSApp CRUD method.
         This method overrides AWSApp instance properties that were set after load_default_config() returns.
         """
+
+        if not check_running_as_user():
+            return QHExit.NOT_QH_USER 
+
         if args['__qhaction'] == 'init':
-            print('init')
-            print(args)
-            exit()
+            logger.debug('init')
             self.plugin_init(args)
-            return 0
+            return QHExit.OK
         elif args['__qhaction'] == 'make':
-            print('make')
+            logger.debug('make')
+            params = self._parse_make(args)
+            print(params)
             self.create(args)
-            return 0
+            return QHExit.OK
         elif args['__qhaction'] == 'describe':
-            print('describe')
+            logger.debug('describe')
             self.describe(args)
-            return 0
+            return QHExit.OK
         elif args['__qhaction'] == 'update':
-            print('update')
-            print("@@@ WIP")
-            return 1
+            logger.debug('update')
+            logger.debug("@@@ WIP")
+            return QHExit.KNOWN_ISSUE
         elif args['__qhaction'] == 'destroy':
-            print('destroy')
+            logger.debug('destroy')
             params = self._parse_destroy(args)
             self.destroy(params)
-            print("@@@ WIP")
-            return 1
+            logger.debug("@@@ WIP")
+            return QHExit.KNOWN_ISSUE
         else:
-            raise Exception("should have printed help in main.py! Bug!")
+            return QHExit.GENERAL_FAILURE
 
     def _parse_init(self, args: dict):
         init_params = args
@@ -214,20 +220,25 @@ class AWSApp(quickhost.AppBase):
                 except ValueError:
                     raise RuntimeError("port numbers must be digits")
             self.ports = ports
-            # @@@ todo: return make_params instead of using AWSApp() properties..?
-            make['ports'] = ports
+            # @@@ todo: return make_params_params instead of using AWSApp() properties..?
+            make_params['ports'] = ports
         else:
             self.ports = QHC.DEFAULT_OPEN_PORTS
+            make_params['ports'] = QHC.DEFAULT_OPEN_PORTS
         # cidrs ingress
+        make_params['cidrs'] = []
         if args['ip'] is None:
             self.cidrs = [quickhost.get_my_public_ip()]
+            make_params['cidrs'].append(quickhost.get_my_public_ip())
         else:
             for i in args['ip']:
                 if len(i.split('/')) == 1:
                     logger.warning(f"Assuming /32 cidr for ip '{i}'")
                     self.cidrs.append(i + "/32")
+                    make_params['cidrs'].append(i + "/32")
                 else:
                     self.cidrs.append(i)
+                    make_params['cidrs'].append(i)
         # userdata
         if 'user_data' in flags:
             if not Path(args['userdata']).exists():
@@ -237,42 +248,51 @@ class AWSApp(quickhost.AppBase):
         # ec2 key name
         if 'key_name' in flags:
             self.key_name = args['key_name']
+            make_params['key_name'] = args['key_name']
         else:
             self.key_name = args['app_name']
+            make_params['key_name'] = args['app_name']
+
         # ec2 key pem file
         if 'ssh_key_filepath' in flags:
             self.ssh_key_filepath = args['ssh_key_filepath']
+            make_params['ssh_key_filepath'] = args['ssh_key_filepath']
         else:
             self.ssh_key_filepath = f"{self.app_name}.pem"
+            make_params['ssh_key_filepath'] = f"{self.app_name}.pem"
 
         # the rest 
         if 'dry_run' in flags:
             #self.dry_run = not args['dry_run']
             self.dry_run = args['dry_run']
+            make_params['dry_run'] = args['dry_run']
         if 'host_count' in flags:
             self.num_hosts = args['host_count']
+            make_params['host_count'] = args['host_count']
         if 'instance_type' in flags:
             self.instance_type = args['instance_type']
+            make_params['instance_type'] = args['instance_type']
         if 'ami' in flags:
             self.ami= args['ami']
+            make_params['ami'] = args['ami']
         if 'vpc_id' in flags:
             self.vpc_id= args['vpc_id']
+            make_params['vpc_id'] = args['vpc_id']
         if 'subnet_id' in flags:
             self.subnet_id= args['subnet_id']
+            make_params['subnet_id'] = args['subnet_id']
 
-        return
-    ### end of _parse_make()
+        return make_params
 
 
     def _parse_describe(self):
         #flags = args.keys()
         self.dry_run = False
-        return
+        return {}
         
     def _parse_destroy(self, args: dict):
         destroy_params = {}
         flags = args.keys()
-        print(f"{flags=}")
         return {
             'app_name': self.app_name,
             'config_file': self.config_file,
@@ -303,9 +323,6 @@ class AWSApp(quickhost.AppBase):
         return None
 
     def describe(self, args: dict) -> None:
-#        sts = boto3.client( 'sts',)
-#        caller_id = sts.get_caller_identity()
-#        print(json.dumps(caller_id, indent=2))
         self._parse_describe()
         sg = SG(
             client=self._client,
@@ -313,30 +330,26 @@ class AWSApp(quickhost.AppBase):
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         )
-        sg.describe()
+        sg_vals = sg.describe()
         kp = KP(
             client=self._client,
             ec2_resource=self._ec2_resource,
             app_name=self.app_name,
         )
+        kp_vals = kp.describe()
         host = AWSHost(
             client=self._client,
             ec2_resource=self._ec2_resource,
             app_name=self.app_name,
         )
-        self.sgid = sg.sgid
-        self.kpid = kp.get_key_id()
-        print(f"{self.sgid=}")
-        print(f"{self.kpid=}")
-        self.ec2ids =  []
-        for inst in host.describe():
-            self.ec2ids.append(inst['instance_id'])
-        self._print_loaded_args(heading=f"Params for app '{self.app_name}'")
+        host_vals = host.describe()
+
+        print(json.dumps(sg_vals,indent=2))
+        print(json.dumps(kp_vals,indent=2))
+        print(json.dumps(host_vals,indent=2))
+        #self._print_loaded_args(heading=f"Params for app '{self.app_name}'")
 
     def create(self, args: dict):
-#        sts = boto3.client( 'sts',)
-#        caller_id = sts.get_caller_identity()
-#        print(json.dumps(caller_id, indent=2))
         p = self._parse_make(args)
         kp = KP(
             client=self._client,
@@ -376,24 +389,14 @@ class AWSApp(quickhost.AppBase):
             userdata=self.userdata,
             dry_run=self.dry_run
         )
-        app_instances = host.wait_for_hosts()
         #_host.get_ssh()
         print('Done')
-        print(app_instances)
-        return
+        return QHExit.OK 
 
     def update(self):
-#        sts = boto3.client( 'sts',)
-#        caller_id = sts.get_caller_identity()
-#        print(json.dumps(caller_id, indent=2))
         pass
 
     def destroy(self, args: dict):
-#        sts = boto3.client( 'sts',)
-#        caller_id = sts.get_caller_identity()
-#        print(json.dumps(caller_id, indent=2))
-        params = self._parse_destroy(args)
-        print(quickhost.convert_datetime_to_string(params))
         kp = KP(
             client=self._client,
             ec2_resource=self._ec2_resource,
@@ -405,15 +408,15 @@ class AWSApp(quickhost.AppBase):
             client=self._client,
             ec2_resource=self._ec2_resource,
             app_name=self.app_name,
-        ).destroy()
-
+        )
+        hc = hosts.get_host_count()
+        print(f"{hc=}")
+        hosts.destroy()
         sg = SG(
             client=self._client,
             ec2_resource=self._ec2_resource,
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         ).destroy()
-        return 
+        return QHExit.OK 
 
-if __name__ == '__main__':
-    pass
