@@ -11,7 +11,7 @@ import quickhost
 from quickhost import APP_CONST as C
 from quickhost.temp_data_collector import store_test_data
 
-from .utilities import get_single_result_id
+from .utilities import get_single_result_id, handle_client_error
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,6 @@ class KP:
                 # It just means less copy-pasting, I suppose.
                 #IncludePublicKey=True
             )
-            print(f"=====> {existing_key=}")
         except ClientError as e: 
             logger.debug(f"No key for app '{self.app_name}'?\n{e}")
             return None
@@ -94,8 +93,9 @@ class KP:
             key_id = existing_key['KeyPairs'][0]['KeyPairId']
             fingerprint = existing_key['KeyPairs'][0]['KeyFingerprint']
         except ClientError as e:
-            if e.response['Error']['Code'] == 'UnauthorizedOperation':
-                logger.error(f"Unauthorized to get EC2 key pair info.")
+            code = e['Error']['Code']
+            if code == 'UnauthorizedOperation':
+                logger.error(f"({code}): {e.operation_name}")
                 return {
                     'key_id': '?',
                     'key_fingerprint': '?'
@@ -133,6 +133,7 @@ class KP:
                 logger.warning(f"Couldn't find key file '{ssh_key_file.name}' to remove!")
             return True
         except ClientError as e:
+            handle_client_error(e)
             logger.warning(f"failed to delete keypair for app '{self.app_name}' (id: '{key_id}'):\n {e}")
             return False
 

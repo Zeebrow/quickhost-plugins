@@ -3,6 +3,7 @@ import json
 import urllib.request
 import logging
 import boto3
+from botocore.exceptions import ClientError
 
 from .constants import AWSConstants
 
@@ -53,4 +54,9 @@ def check_running_as_user(tgt_user_name=AWSConstants.DEFAULT_IAM_USER):
 
 def get_ssh(key_filepath, ip, username='ec2-user'):
     print(f"ssh -i {key_filepath} {username}@{ip}")
-    
+
+def handle_client_error(e: ClientError):
+    code = e['Error']['Code']
+    if code == 'UnauthorizedOperation':
+        logger.error(f"({code}): {e.operation_name}")
+

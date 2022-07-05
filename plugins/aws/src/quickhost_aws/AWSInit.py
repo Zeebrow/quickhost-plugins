@@ -1,12 +1,16 @@
 import logging
+import json
 from pathlib import Path
 
 import boto3
+from botocore.exceptions import ClientError
 
 import quickhost as qh
 from quickhost import APP_CONST as C
 
-from .utilities import get_single_result_id
+from .utilities import get_single_result_id, check_running_as_user
+from .constants import AWSConstants
+
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +31,13 @@ class AWSInit:
     def create(self, cidr_block=C.DEFAULT_VPC_CIDR):
         self.__dict__.update(self.get())
         ec2 = boto3.resource('ec2')
+        if not check_running_as_user():
+            logger.info(f"No user '{AWSConstants.DEFAULT_IAM_USER}', found, creating...")
 
         vpc = None 
         if not self.vpc_id:
             logger.debug("creating vpc...")
+
             vpc = ec2.create_vpc(
                 CidrBlock=cidr_block,
                 DryRun=self.dry_run,
@@ -162,6 +169,8 @@ class AWSInit:
             "rt_id": rt_id,
             "igw_id": igw_id,
         }
+    def describe(self):
+        return self.get()
 
     def destroy(self):
         # @@@ admin-like account or fail

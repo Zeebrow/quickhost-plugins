@@ -8,10 +8,12 @@ import os
 import json
 
 import boto3
+from botocore.exceptions import ClientError
 
 import quickhost
 from quickhost import APP_CONST as QHC, QHExit
 
+from .AWSIam import Iam
 from .AWSSG import SG
 from .AWSHost import AWSHost
 from .AWSKeypair import KP
@@ -20,7 +22,6 @@ from .constants import AWSConstants
 from .utilities import check_running_as_user, get_ssh
 
 logger = logging.getLogger(__name__)
-
 
 class AWSApp(quickhost.AppBase):
     """
@@ -78,10 +79,17 @@ class AWSApp(quickhost.AppBase):
         if not inp.lower() == ('y' or 'yes'):
             print('Aborted')
             exit(3)
+        qh_iam = Iam()
+        qh_iam.qh_policy_arns()
+        #qh_iam.destroy()
+        qh_iam.create()
+        exit()
         networking_params= AWSInit(
             app_name=self.app_name,
             client=self._client,
         )
+        networking_params.create_user()
+        return
         p = networking_params.create()
         #p = networking_params.destroy()
         #p = networking_params.get()
@@ -126,12 +134,15 @@ class AWSApp(quickhost.AppBase):
             logger.debug(f"No app config ({self._app_cfg_key()}) found in config file '{self.config_file}'")
             app_config = None
 
-    def init_parser_arguments(self, parser: ArgumentParser):
+    def init_parser_arguments(self, parser: ArgumentParser, arguments: list):
+        #init_parser = ArgumentParser(parents=[parser], conflict_handler='resolve')
+        #init_parser = ArgumentParser("AWS init", parents=[parser], add_help=False)
+        init_parser = ArgumentParser("AWS init", add_help=False)
         #parser.add_argument("-y", "--dry-run", required=False, action='store_true', help="prevents any resource creation when set")
         #parser.add_argument("-a", "--aws-access-key-id", required=False, action='store_true', help="the access key id provided when creating root account credentials")
-        #parser.add_argument("-x", "--aws-secret-access-key", required=False, action='store_true', help="the secret access key provided when creating root account credentials")
-        #parser.add_argument("-f", "--root-key-csv", required=False, action='store_true', help="path to the rootkey.csv file downloaded when creating root account credentials")
-        return None
+        #init_parser.add_argument("-x", "--aws-secret-access-key", required=False, action='store', help="the secret access key provided when creating root account credentials")
+        #parser.add_argument("-f", "--user-key-csv", required=False, action='store_true', help="path to the rootkey.csv file downloaded when creating root account credentials")
+        return init_parser
 
     def describe_parser_arguments(self, parser: ArgumentParser):
         pass
@@ -164,35 +175,43 @@ class AWSApp(quickhost.AppBase):
         """required cli arguments, as well as allowed overrides"""
         pass
     
+    def run_init(self, args: dict):
+            logger.debug('init')
+            self.plugin_init(args)
+            return QHExit.OK
+
     def run(self, args: dict):
         """
         eats a user's input from the CLI 'form' that parser_arguments() sets up. 
         Subsequently calls an appropriate AWSApp CRUD method.
         This method overrides AWSApp instance properties that were set after load_default_config() returns.
         """
-
-        if not check_running_as_user():
-            return QHExit.NOT_QH_USER 
-
         if args['__qhaction'] == 'init':
             logger.debug('init')
             self.plugin_init(args)
             return QHExit.OK
         elif args['__qhaction'] == 'make':
+            if not check_running_as_user():
+                return QHExit.NOT_QH_USER 
             logger.debug('make')
             params = self._parse_make(args)
-            print(params)
             self.create(args)
             return QHExit.OK
         elif args['__qhaction'] == 'describe':
+            if not check_running_as_user():
+                return QHExit.NOT_QH_USER 
             logger.debug('describe')
             self.describe(args)
             return QHExit.OK
         elif args['__qhaction'] == 'update':
+            if not check_running_as_user():
+                return QHExit.NOT_QH_USER 
             logger.debug('update')
             logger.debug("@@@ WIP")
             return QHExit.KNOWN_ISSUE
         elif args['__qhaction'] == 'destroy':
+            if not check_running_as_user():
+                return QHExit.NOT_QH_USER 
             logger.debug('destroy')
             params = self._parse_destroy(args)
             self.destroy(params)
@@ -299,7 +318,7 @@ class AWSApp(quickhost.AppBase):
             'dry_run': False,
         }
 
-    def _print_loaded_args(self, heading=None) -> None:
+    def _print_loaded_args(self, d: dict, heading=None) -> None:
         """print the currently loaded app parameters"""
         underline_char = '*'
         fill_char = '.'
@@ -313,11 +332,14 @@ class AWSApp(quickhost.AppBase):
                 termwidth = 40
             else:
                 termwidth = os.get_terminal_size()[0] 
-            for k,v in self.__dict__.items():
+            for k,v in d.items():
                 if not k.startswith("_"):
+                    if heading:
+                        k = underline_char + k
                     print("{0:{fc}{align}{width}}{1}".format(
                         k, v, fc=fill_char, align='<', width=termwidth
                     ))
+            
         else:
             logger.warning("There's nowhere to show your results!")
         return None
@@ -339,7 +361,6 @@ class AWSApp(quickhost.AppBase):
             "invoking_user_name": running_as_user,
             "invoking_user_id": running_as_user_id,
         }
-
         sg = SG(
             client=self._client,
             ec2_resource=self._ec2_resource,
@@ -359,13 +380,18 @@ class AWSApp(quickhost.AppBase):
             app_name=self.app_name,
         )
         host_vals = host.describe()
-
-        print(json.dumps(sg_vals,indent=2))
-        print(json.dumps(kp_vals,indent=2))
-        print(json.dumps(host_vals,indent=2))
-        print(json.dumps(iam_vals,indent=2))
-        for h in host_vals:
-            get_ssh(kp_vals['key_filepath'], h['public_ip'])
+        init = AWSInit(
+            app_name=self.app_name,
+            client=self._client
+        )
+        # idk man
+        self._print_loaded_args(init.describe(),heading=f"global params")
+        self._print_loaded_args(iam_vals)
+        self._print_loaded_args(sg_vals)
+        self._print_loaded_args(kp_vals)
+        for i,host in enumerate(host_vals):
+            self._print_loaded_args(host, heading=f"host {i}")
+            #get_ssh(kp_vals['key_filepath'], h['public_ip'])
         #self._print_loaded_args(heading=f"Params for app '{self.app_name}'")
 
     def create(self, args: dict):

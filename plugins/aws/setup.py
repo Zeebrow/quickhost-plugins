@@ -13,6 +13,7 @@ setup(
     ],
     #depends_on=
     entry_points={
+        # "group_name" : ["???"="name:function"]
         "quickhost_plugin": ['quickhost_aws=quickhost_aws:load_plugin']
     }
 )

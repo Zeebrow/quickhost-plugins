@@ -75,30 +75,55 @@ class SG:
         return sg['GroupId']
 
     def destroy(self):
-        sg_id = self.get_security_group_id()
-        if not sg_id:
-            logger.debug(f"No security group found for app '{self.app_name}'")
-            return None
-        self.client.delete_security_group( GroupId=sg_id)
-        print(f"deleting security group '{sg_id}'")
+        try:
+            sg_id = self.get_security_group_id()
+            if not sg_id:
+                logger.debug(f"No security group found for app '{self.app_name}'")
+                return None
+            self.client.delete_security_group( GroupId=sg_id)
+            print(f"deleting security group '{sg_id}'")
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
+                logger.info(f"No security group found for app '{self.app_name}', skipping...")
+                return
+            elif e.response['Error']['Code'] == 'UnauthorizedOperation':
+                logger.error(f"({e.response['Error']['Code']}): {e.operation_name}")
+#                logger.error(f"Unauthorized to get security group info: {e.response['Error']['Code']}: {e.response['Error']['Message']}")
+#                logger.error(f"{e.args=}")
+#                logger.error(f"{e.operation_name=}")
+                return
+            else:
+                logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
+                return
         return
 
     def _add_ingress(self, cidrs, ports):
         print('adding sg ingress...', end='')
-        perms = []
-        for port in ports:
-            perms.append({
-                'FromPort': int(port),
-                'IpProtocol': 'tcp',
-                'IpRanges': [ { 'CidrIp': cidr, 'Description': 'made with quickhosts' } for cidr in cidrs ],
-                'ToPort': int(port),
-            })
-        response = self.client.authorize_security_group_ingress(
-            GroupId=self.sgid,
-            IpPermissions=perms,
-            DryRun=False
-        )
-        print(f"done ({[i for i in cidrs]}:{[p for p in ports]})")
+        try:
+            perms = []
+            for port in ports:
+                perms.append({
+                    'FromPort': int(port),
+                    'IpProtocol': 'tcp',
+                    'IpRanges': [ { 'CidrIp': cidr, 'Description': 'made with quickhosts' } for cidr in cidrs ],
+                    'ToPort': int(port),
+                })
+            response = self.client.authorize_security_group_ingress(
+                GroupId=self.sgid,
+                IpPermissions=perms,
+                DryRun=False
+            )
+            print(f"done ({[i for i in cidrs]}:{[p for p in ports]})")
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
+                logger.info(f"No security group found for app '{self.app_name}', skipping...")
+                return
+            elif e.response['Error']['Code'] == 'UnauthorizedOperation':
+                logger.error(f"Unauthorized to get security group info: {e.response['Error']['Code']}: {e.response['Error']['Message']}")
+                return
+            else:
+                logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
+                return
         #store_test_data(resource='SG', action='_add_ingress', response_data=response)
 
     def describe(self):
@@ -139,7 +164,7 @@ class SG:
                     'cidrs': [None],
                 }
             if e.response['Error']['Code'] == 'UnauthorizedOperation':
-                logger.error(f"Unauthorized to get security group info.")
+                logger.error(f"Unauthorized to get security group info: {e.response['Error']['Code']}: {e.response['Error']['Message']}")
                 return {
                     'sgid': '?',
                     'ports': ['?'],

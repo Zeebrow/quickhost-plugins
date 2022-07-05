@@ -130,12 +130,20 @@ class AWSHost:
         logger.debug(f"destroying instnaces: ")
         tgt_instances = self.get_instance_ids(HostState.running)
         if tgt_instances is None:
-             logger.debug(f"No instances found for app '{self.app_name}'")
-             return None
-        response = self.client.terminate_instances(
-            InstanceIds=tgt_instances
-        )
-        self.wait_for_hosts_to_terminate(tgt_instances=tgt_instances)
+            logger.debug(f"No instances found for app '{self.app_name}'")
+            return None
+        try:
+            response = self.client.terminate_instances(
+                InstanceIds=tgt_instances
+            )
+            self.wait_for_hosts_to_terminate(tgt_instances=tgt_instances)
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'UnauthorizedOperation':
+                logger.error(f"Unauthorized to get security group info.")
+                return False
+            else:
+                logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
+                return False
         # {'TerminatingInstances': [{'CurrentState': {'Code': 32, 'Name': 'shutting-down'}, 'InstanceId': 'i-090ab1a37ba8583bd', 'PreviousState': {'Code': 16, 'Name': 'running'}}], 'ResponseMetadata': {'RequestId': 'bf923b37-a043-4150-8654-d4fcbca4b0bc', 'HTTPStatusCode': 200, 'HTTPHeaders': {'x-amzn-requestid': 'bf923b37-a043-4150-8654-d4fcbca4b0bc', 'cache-control': 'no-cache, no-store', 'strict-transport-security': 'max-age=31536000; includeSubDomains', 'vary': 'accept-encoding', 'content-type': 'text/xml;charset=UTF-8', 'transfer-encoding': 'chunked', 'date': 'Sun, 03 Jul 2022 00:31:55 GMT', 'server': 'AmazonEC2'}, 'RetryAttempts': 0}}
         print(f"{response=}")
 
