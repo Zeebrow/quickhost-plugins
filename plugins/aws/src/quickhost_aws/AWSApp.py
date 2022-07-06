@@ -20,10 +20,11 @@ from .AWSKeypair import KP
 from .AWSNetworking import AWSNetworking
 from .constants import AWSConstants
 from .utilities import check_running_as_user, get_ssh
+from .AWSResource import AWSResourceBase
 
 logger = logging.getLogger(__name__)
 
-class AWSApp(quickhost.AppBase):
+class AWSApp(quickhost.AppBase, AWSResourceBase):
     """
     AWSApp
     Sort-of a dataclass, sort-of not.
@@ -59,7 +60,7 @@ class AWSApp(quickhost.AppBase):
         self.vpc_id = None
         self.subnet_id = None
         self.sgid = None
-        self.load_default_config()
+        #self.load_default_config()
 
     def plugin_init(self, init_args: dict):
         """
@@ -69,13 +70,13 @@ class AWSApp(quickhost.AppBase):
         - VPC/Subnet/Routing/networking per-region
         """
         params = self._parse_init(init_args)
+        iam_client = self.get_client(resource='iam', profile=params['profile'])
+        sts_client = self.get_client(resource='sts', profile=params['profile'])
+        ec2_client = self.get_client(resource='ec2', profile=params['profile'])
 
-        iam = boto3.client( 'iam',)
-        sts = boto3.client( 'sts',)
-        caller_id = sts.get_caller_identity()
-        iam = boto3.client('iam')
-        username = quickhost.scrub_datetime(iam.get_user())['User']['UserName']
-        user_id = quickhost.scrub_datetime(iam.get_user())['User']['UserId']
+        caller_id = sts_client.get_caller_identity()
+        username = quickhost.scrub_datetime(iam_client.get_user())['User']['UserName']
+        user_id = quickhost.scrub_datetime(iam_client.get_user())['User']['UserId']
         acct = caller_id['Account']
         
         caller_id.pop('ResponseMetadata')
@@ -83,36 +84,27 @@ class AWSApp(quickhost.AppBase):
         if not inp.lower() == ('y' or 'yes'):
             print('Aborted')
             exit(3)
-        qh_iam = Iam()
+        qh_iam = Iam(profile=params['profile'])
+        print(json.dumps(qh_iam.describe(), indent=2))
         qh_iam.create()
         #qh_iam.destroy()
         #qh_iam.describe()
         print(json.dumps(qh_iam.describe(), indent=2))
-        return 
-        session = boto3.session.Session(profile_name=AWSConstants.DEFAULT_IAM_USER)
-        print(f"{session.available_profiles()=}")
-        print(f"{session.region_name=}")
-        print(f"{session.get_credentials()=}")
-        _client = session.client('ec2')
         networking_params= AWSNetworking(
             app_name=self.app_name,
-            client=_client,
+            profile=params['profile']
         )
-        return
+        print(json.dumps(networking_params.describe(), indent=2))
         p = networking_params.create()
         #p = networking_params.destroy()
         #p = networking_params.get()
         print(p)
+        print(json.dumps(networking_params.describe(), indent=2))
         return 
 
-#    def _all_cfg_key(self):
-#        return f'{self._cli_parser_id}:all'
-#    def _app_cfg_key(self):
-#        return f'{self.app_name}:{self._cli_parser_id}'
     def load_default_config(self):
         networking_params = AWSNetworking(
             app_name=self.app_name,
-            client=self._client,
         ).get()
         self.vpc_id = networking_params['vpc_id']
         self.subnet_id = networking_params['subnet_id']
@@ -165,11 +157,11 @@ class AWSApp(quickhost.AppBase):
         parser.add_argument("-u", "--userdata", required=False, default=SUPPRESS, help="path to optional userdata file")
         return None
 
-    def get_make_parser(self, parser: ArgumentParser):
+    def get_make_parser(self):
         """arguments for `make`"""
         make_parser = ArgumentParser("AWS make", add_help=False)
 
-        make_parser.add_argument("app_name")
+        #make_parser.add_argument(f"--{AWSApp.plugin_name}", dest="app_name")
         make_parser.add_argument("--vpc-id", required=False, default=SUPPRESS, help="specify a VpcId to choose the vpc in which to launch hosts")
         make_parser.add_argument("--subnet-id", required=False, default=SUPPRESS, help="specify a SubnetId to choose the subnet in which to launch hosts")
         make_parser.add_argument("-c", "--host-count", required=False, default=1, help="number of hosts to create")
@@ -180,6 +172,7 @@ class AWSApp(quickhost.AppBase):
         make_parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
         make_parser.add_argument("--ami", required=False, default=SUPPRESS, help="change the ami to launch, see source-aliases for getting lastest")
         make_parser.add_argument("-u", "--userdata", required=False, default=SUPPRESS, help="path to optional userdata file")
+
         return make_parser
 
     @classmethod
@@ -188,17 +181,18 @@ class AWSApp(quickhost.AppBase):
         pass
     
     def run_init(self, args: dict):
-            logger.debug('run init')
-            self.plugin_init(args)
-            return QHExit.OK
+        """must be run as an admin-like user"""
+        logger.debug('run init')
+        self.plugin_init(args)
+        return QHExit.OK
 
     def run_make(self, args: dict):
-            if not check_running_as_user():
-                return QHExit.NOT_QH_USER 
-            logger.debug('make')
-            params = self._parse_make(args)
-            self.create(args)
-            return QHExit.OK
+        if not check_running_as_user():
+            return QHExit.NOT_QH_USER 
+        logger.debug('make')
+        params = self._parse_make(args)
+        self.create(args)
+        return QHExit.OK
 
     def run(self, args: dict):
         """
@@ -206,6 +200,7 @@ class AWSApp(quickhost.AppBase):
         Subsequently calls an appropriate AWSApp CRUD method.
         This method overrides AWSApp instance properties that were set after load_default_config() returns.
         """
+        return QHExit.KNOWN_ISSUE
         if args['__qhaction'] == 'init':
             logger.debug('init')
             self.plugin_init(args)
@@ -483,4 +478,3 @@ class AWSApp(quickhost.AppBase):
             vpc_id=self.vpc_id,
         ).destroy()
         return QHExit.OK 
-

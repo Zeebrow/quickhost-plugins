@@ -10,18 +10,20 @@ from quickhost import APP_CONST as C
 
 from .utilities import get_single_result_id, check_running_as_user
 from .constants import AWSConstants
+from .AWSResource import AWSResourceBase
 
 
 logger = logging.getLogger(__name__)
 
-class AWSNetworking:
+class AWSNetworking(AWSResourceBase):
     DefaultFilter = { 'Name': 'tag:Name', 'Values': [ C.DEFAULT_APP_NAME ] }
     DefaultTag = { 'Value': f"{C.DEFAULT_APP_NAME}", 'Key': 'Name' }
     TagSpec = lambda resource: { 'ResourceType': resource, 'Tags': [ AWSNetworking.DefaultTag ] }
 
-    def __init__(self, app_name: str, client: boto3.client, dry_run=False):
+    def __init__(self, app_name: str, profile=None, dry_run=False):
         self.app_name = app_name
-        self.client = client
+        self.client = self.get_client('ec2', profile=profile)
+        self.ec2 = self.get_resource('ec2', profile=profile)
         self.dry_run = dry_run
         self.vpc_id = None
         self.igw_id = None
@@ -30,9 +32,7 @@ class AWSNetworking:
 
     def create(self, cidr_block=C.DEFAULT_VPC_CIDR):
         self.__dict__.update(self.get())
-        ec2 = boto3.resource('ec2')
-        if not check_running_as_user():
-            logger.info(f"No user '{AWSConstants.DEFAULT_IAM_USER}', found, creating...")
+        ec2 = self.ec2
 
         vpc = None 
         if not self.vpc_id:
@@ -140,7 +140,7 @@ class AWSNetworking:
         rt = ec2.RouteTable(self.rt_id)
 
     def get(self):
-        ec2 = boto3.resource('ec2')
+        ec2 = self.ec2
 
         existing_vpcs = self.client.describe_vpcs( Filters=[ AWSNetworking.DefaultFilter ],)
         vpc_id = get_single_result_id("Vpc", existing_vpcs)
@@ -173,7 +173,7 @@ class AWSNetworking:
         return self.get()
 
     def destroy(self):
-        ec2 = boto3.resource('ec2')
+        ec2 = self.ec2
         self.__dict__.update(self.get())
         vpc = ec2.Vpc(self.vpc_id)
         subnet = ec2.Subnet(self.subnet_id)
@@ -198,5 +198,4 @@ class AWSNetworking:
         logger.debug(f"deleting vpc '{self.vpc_id}'...")
         vpc.delete(DryRun=False)
         logger.debug(f"Done.")
-
 

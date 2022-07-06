@@ -13,6 +13,7 @@ from quickhost.temp_data_collector import store_test_data
 
 from .AWSSG import SG
 from .constants import AWSConstants as AWS
+from .AWSResource import AWSResourceBase
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +45,10 @@ class HostState:
         return rtn
 
 
-class AWSHost:
-    def __init__(self, client: any, ec2_resource, app_name):
-        self.client = client
-        self.ec2 = ec2_resource
+class AWSHost(AWSResourceBase):
+    def __init__(self, app_name):
+        self.client = self.get_client('ec2')
+        self.ec2 = self.get_resource('ec2')
         self.app_name=app_name
         self.host_count = None
 

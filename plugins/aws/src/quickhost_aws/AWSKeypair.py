@@ -12,15 +12,16 @@ from quickhost import APP_CONST as C
 from quickhost.temp_data_collector import store_test_data
 
 from .utilities import get_single_result_id, handle_client_error
+from .AWSResource import AWSResourceBase
 
 logger = logging.getLogger(__name__)
 
-class KP:
+class KP(AWSResourceBase):
     #def __init__(self, client: any, ec2_resource: any, app_name: str, ssh_key_filepath=None, key_name=None, dry_run=True):
-    def __init__(self, client: any, ec2_resource: any, app_name: str):
-        self.client = client
+    def __init__(self, app_name: str):
+        self.client = self.get_client('ec2')
+        self.ec2 = self.get_resource('ec2')
         self.app_name = app_name
-        self.ec2 = ec2_resource
         self.key_name = app_name 
         self.key_filepath = C.DEFAULT_SSH_KEY_FILE_DIR / f"{self.key_name}.pem"
 

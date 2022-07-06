@@ -6,23 +6,21 @@ import json
 import boto3
 import botocore.exceptions
 
+from quickhost.temp_data_collector import store_test_data
+
 from .constants import *
 from .utilities import QH_Tag
 #from .temp_data_collector import store_test_data
-from quickhost.temp_data_collector import store_test_data
+from .AWSResource import AWSResourceBase
 
 
 logger = logging.getLogger(__name__)
 
-class AWSPort:
-    """This will be fun"""
-    pass
-
-class SG:
+class SG(AWSResourceBase):
     #def __init__(self, client: any, ec2_resource: any, app_name: str, vpc_id: str, ports: List[int], cidrs: List[str], dry_run: bool):
-    def __init__(self, client: any, ec2_resource: any, app_name: str, vpc_id: str):
-        self.client = client
-        self.ec2 = ec2_resource
+    def __init__(self, app_name: str, vpc_id: str):
+        self.client = self.get_client('ec2')
+        self.ec2 = self.get_resource('ec2')
         self.app_name = app_name
         self.vpc_id = vpc_id
 #        self.ports = None

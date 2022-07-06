@@ -10,15 +10,17 @@ from quickhost import scrub_datetime
 
 from .utilities import get_single_result_id, check_running_as_user
 from .constants import AWSConstants
+from .AWSResource import AWSResourceBase
 
 logger = logging.getLogger(__name__)
 
-class Iam:
+class Iam(AWSResourceBase):
     """
     Manage AWS IAM (account-global) quickhost resources' lifecycle
     """
-    def __init__(self):
-        self.client = boto3.client('iam')
+    def __init__(self, profile=None):
+        self.client = self.get_client('iam', profile=profile)
+        self.iam = self.get_resource('iam', profile=profile)
         self.iam_user = AWSConstants.DEFAULT_IAM_USER
         self.iam_group = f"{AWSConstants.DEFAULT_IAM_USER}s"
 
@@ -40,7 +42,7 @@ class Iam:
         return rtn
 
     def destroy(self):
-        iam = boto3.resource('iam')
+        iam = self.iam
         policy_arns = self.qh_policy_arns()
         user = iam.User(self.iam_user)
         group = iam.Group(self.iam_group)
@@ -92,13 +94,13 @@ class Iam:
                 logger.error(f"Unknown error caught while deleting user: {e}")
 
     def create_policies(self):
-        iam = boto3.resource('iam')
+        iam = self.iam
         policy_arns = self.qh_policy_arns()
         for action,arn in policy_arns.items():
             arn = self._create_qh_policy(action)
 
     def attach_policies_and_group(self):
-        iam = boto3.resource('iam')
+        iam = self.iam
         group = iam.Group(self.iam_group)
         policy_arns = self.qh_policy_arns()
         for action,arn in policy_arns.items():
@@ -111,7 +113,7 @@ class Iam:
         logger.info(f"User '{self.iam_user}' is attached to group '{group.name}'")
 
     def create_user_group(self):
-        iam = boto3.resource('iam')
+        iam = self.iam
         existing_policies = self.qh_policy_arns()
         user = iam.User(self.iam_user)
         group = iam.Group(self.iam_group)
@@ -161,7 +163,7 @@ class Iam:
         return rtn
 
     def _create_qh_policy(self, action: str) -> str:
-        iam = boto3.resource('iam')
+        iam = self.iam
         existing_policies = self.qh_policy_arns()
         arn = None
         try: 
@@ -227,7 +229,7 @@ class Iam:
             logger.warning(f"No credentials for '{self.iam_user}' found to remove.")
 
         # @@@ might be better in a delete_user()
-        iam = boto3.resource('iam')
+        iam = self.iam
         user = iam.User(self.iam_user)
         keys = user.access_keys.all()
         for k in keys:
@@ -242,7 +244,7 @@ class Iam:
             raise Exception("Unable to determine if config exists.")
 
         if not current_credentials['credentials']['default-region']:
-            iam = boto3.resource('iam')
+            iam = self.iam
             aws_config_dir = Path.home()/".aws"
             aws_config_file = aws_config_dir/"config"
             config_parser = ConfigParser()
@@ -272,7 +274,7 @@ class Iam:
             raise Exception("Unable to determine if credentials exist.")
 
         if not current_credentials['credentials']['credentials-exist']:
-            iam = boto3.resource('iam')
+            iam = self.iam
             aws_config_dir = Path.home()/".aws" 
             aws_credentials_file = aws_config_dir/"credentials"
             credentials_parser = ConfigParser()
@@ -316,7 +318,7 @@ class Iam:
             'arn': '',
             'attached-policies': [],
         }
-        iam = boto3.resource('iam')
+        iam = self.iam
         try:
             group = iam.Group(self.iam_group)
             rtn['arn'] = group.arn
@@ -337,7 +339,7 @@ class Iam:
             'access-keys': [],
         }
 
-        iam = boto3.resource('iam')
+        iam = self.iam
         try:
             user = iam.User(self.iam_user)
             rtn['arn'] = user.arn
@@ -432,6 +434,7 @@ PolicyData = {
                 "Sid": "quickhostDescribe",
                 "Effect": "Allow",
                 "Action": [
+                    "iam:GetUser",
                     "iam:ListUsers",
                     "ec2:DescribeInstances",
                     "ec2:DescribeVpcs",
