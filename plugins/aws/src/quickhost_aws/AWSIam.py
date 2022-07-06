@@ -14,16 +14,30 @@ from .constants import AWSConstants
 logger = logging.getLogger(__name__)
 
 class Iam:
+    """
+    Manage AWS IAM (account-global) quickhost resources' lifecycle
+    """
     def __init__(self):
         self.client = boto3.client('iam')
         self.iam_user = AWSConstants.DEFAULT_IAM_USER
         self.iam_group = f"{AWSConstants.DEFAULT_IAM_USER}s"
 
     def create(self):
+        current_policies = self._describe_user_credentials()
         self.create_user_group()
+        self._create_user_config()
         self._create_user_credentials()
         self.create_policies()
         self.attach_policies_and_group()
+
+    def describe(self):
+        rtn = {
+            'credentials': self._describe_user_credentials(),
+            'iam-user': self._describe_iam_user(),
+            'iam-group': self._describe_iam_group(),
+            'iam-policies': self._describe_iam_policies(),
+        }
+        return rtn
 
     def destroy(self):
         iam = boto3.resource('iam')
@@ -66,8 +80,9 @@ class Iam:
                 logger.error(f"Unknown error caught while deleting group: {e}")
         ########################################################
         try:
-            user.delete()
+            self._delete_user_config()
             self._delete_user_credentials()
+            user.delete()
             logger.info(f"Deleted user {user.arn}... ")
         except ClientError as e:
             code = e.__dict__['response']['Error']['Code']
@@ -166,69 +181,233 @@ class Iam:
                 arn = existing_policies[action]
         return arn
 
+    def _delete_user_config(self):
+        current_credentials = self.describe()
+
+        if current_credentials['credentials']['default-region'] is None:
+            #logger.warning("Unable to determine if config exists.")
+            raise Exception("Unable to determine if config exists.")
+
+        if current_credentials['credentials']['default-region'] != '':
+            aws_config_dir = Path.home()/".aws"
+            aws_config_file = aws_config_dir/"config"
+            config_parser = ConfigParser()
+            config_parser.read(aws_config_file)
+            cfg_deleted = config_parser.remove_section(f"profile {self.iam_user}")
+            if cfg_deleted:
+                with aws_config_file.open('w') as aws_cfg:
+                    config_parser.write(aws_cfg)
+                logger.info(f"deleted {self.iam_user} from aws config file.")
+            else:
+                logger.error(f"Can't delete profile for {self.iam_user}: does not exist.") 
+        else:
+            logger.warning(f"Can't delete profile for {self.iam_user}: does not exist.")
+        return False
+
     def _delete_user_credentials(self):
-        aws_config_dir = Path.home() / '.aws'
-        aws_credentials_file = aws_config_dir / "credentials"
-        aws_config_file = aws_config_dir / "config"
+        current_credentials = self.describe()
+        if current_credentials['credentials']['credentials-exist'] is None:
+            #logger.warning("Unable to determine if credentials exist.")
+            raise Exception("Unable to determine if credentials exist.")
+
+        if current_credentials['credentials']['credentials-exist'] is True:
+            aws_config_dir = Path.home()/".aws"
+            aws_credentials_file = aws_config_dir/"credentials"
+
+            credentials_parser = ConfigParser()
+            credentials_parser.read(aws_credentials_file)
+            creds_deleted = credentials_parser.remove_section(self.iam_user)
+            if creds_deleted:
+                with aws_credentials_file.open('w') as aws_creds:
+                    credentials_parser.write(aws_creds)
+                logger.info(f"deleted {self.iam_user} from aws credentials file.")
+            else:
+                logger.error(f"No credentials for '{self.iam_user}' found to remove.")
+        else:
+            logger.warning(f"No credentials for '{self.iam_user}' found to remove.")
+
+        # @@@ might be better in a delete_user()
         iam = boto3.resource('iam')
         user = iam.User(self.iam_user)
         keys = user.access_keys.all()
         for k in keys:
             logger.info(f"Deleting access key: {k.id}...")
             k.delete()
-
-        config_parser = ConfigParser()
-        config_parser.read(aws_config_file)
-        cfg_deleted = config_parser.remove_section(f"profile {self.iam_user}")
-        if cfg_deleted:
-            with aws_config_file.open('w') as aws_cfg:
-                aws_cfg.write(config_parser)
-            logger.info(f"deleted {self.iam_user} from aws config file.")
-
-        credentials_parser = ConfigParser()
-        credentials_parser.read(aws_credentials_file)
-        creds_deleted = config_parser.remove_section(f"profile {self.iam_user}")
-        if creds_deleted:
-            with aws_credentials_file.open('w') as aws_creds:
-                aws_cfg.write(config_parser)
-            logger.info(f"deleted {self.iam_user} from aws credentials file.")
         return 
 
-    def _create_user_credentials(self, region='us-east-1', output='json'):
-        aws_config_dir = Path.home() / '.aws'
+    def _create_user_config(self, region='us-east-1', output='json'):
+        current_credentials = self.describe()
+        if current_credentials['credentials']['default-region'] is None:
+            #logger.warning("Unable to determine if config exists.")
+            raise Exception("Unable to determine if config exists.")
+
+        if not current_credentials['credentials']['default-region']:
+            iam = boto3.resource('iam')
+            aws_config_dir = Path.home()/".aws"
+            aws_config_file = aws_config_dir/"config"
+            config_parser = ConfigParser()
+            config_parser.read(aws_config_file)
+
+            if not aws_config_dir.exists():
+                logger.info(f"Creating new directory for aws credentials: {aws_config_dir.absolute()}")
+                logger.warning(f"(not really)")
+            if not self.iam_user in config_parser:
+                config_parser[f"profile {self.iam_user}"] = {
+                    'region': region,
+                    'output': output,
+                }
+                with aws_config_file.open('w') as aws_cfg:
+                    config_parser.write(aws_cfg)
+                logger.info(f"Added {self.iam_user} profile to {aws_config_file.absolute()}.")
+                return True
+            else: # should never reach here
+                logger.error(f"Profile for {self.iam_user} already exists.")
+        else:
+            logger.warning(f"Profile for {self.iam_user} already exists.")
+        return False
+
+    def _create_user_credentials(self):
+        current_credentials = self.describe()
+        if current_credentials['credentials']['credentials-exist'] is None:
+            raise Exception("Unable to determine if credentials exist.")
+
+        if not current_credentials['credentials']['credentials-exist']:
+            iam = boto3.resource('iam')
+            aws_config_dir = Path.home()/".aws" 
+            aws_credentials_file = aws_config_dir/"credentials"
+            credentials_parser = ConfigParser()
+            credentials_parser.read(aws_credentials_file)
+            if not aws_config_dir.exists():
+                logger.info(f"Creating new directory for aws credentials: {aws_config_dir.absolute()}")
+                logger.warning(f"(not really)")
+
+            # separate?
+            user = iam.User(self.iam_user)
+            access_key_pair = user.create_access_key_pair()
+            if not self.iam_user in credentials_parser: # shoultn't be necessary
+                credentials_parser[self.iam_user] = {
+                    'aws_access_key_id': access_key_pair.id,
+                    'aws_secret_access_key': access_key_pair.secret,
+                }
+                with aws_credentials_file.open('w') as aws_creds:
+                    credentials_parser.write(aws_creds)
+                aws_credentials_file.chmod(0o0600)
+                logger.info(f"Added {self.iam_user} credentials to {aws_credentials_file.absolute()}.")
+            else:
+                logger.debug(f"Credentials for {self.iam_user} already exists.")
+
+    def _describe_iam_policies(self):
+        rtn = {
+            'create': None, 
+            'describe': None, 
+            'update': None, 
+            'destroy': None, 
+        }
+        policies = self.qh_policy_arns() #exceptions handled here
+        for k,v in policies.items():
+            if v is not None:
+                rtn[k] = v
+            else:
+                rtn[k] = ''
+        return rtn # should never have a None field
+
+    def _describe_iam_group(self):
+        rtn = {
+            'arn': '',
+            'attached-policies': [],
+        }
         iam = boto3.resource('iam')
-        user = iam.User(self.iam_user)
-        access_key_pair = user.create_access_key_pair()
+        try:
+            group = iam.Group(self.iam_group)
+            rtn['arn'] = group.arn
+        except ClientError as e:
+            code = e.__dict__['response']['Error']['Code']
+            if code == 'NoSuchEntity':
+                logger.debug(f"Group '{self.iam_group}' does not exist.")
+            else:
+                logger.error(f"Unknown error caught: {e}")
+            return rtn # return before trying to get nogroup's policies.
+        for attached_policy in group.attached_policies.all():
+            rtn['attached-policies'].append(attached_policy.arn)
+        return rtn
 
-        if not aws_config_dir.exists():
-            logger.info(f"Creating new directory for aws credentials: {aws_config_dir.absolute()}")
-            logger.warning(f"(not really)")
-        aws_credentials_file = aws_config_dir / "credentials"
+    def _describe_iam_user(self):
+        rtn = {
+            'arn': '',
+            'access-keys': [],
+        }
+
+        iam = boto3.resource('iam')
+        try:
+            user = iam.User(self.iam_user)
+            rtn['arn'] = user.arn
+        except ClientError as e:
+            code = e.__dict__['response']['Error']['Code']
+            if code == 'NoSuchEntity':
+                logger.info(f"User '{self.iam_user}' was removed from Group '{self.iam_group}'")
+            else:
+                logger.error(f"Unknown error caught while deleting group: {e}")
+            return rtn #return before trying to get nobody's access keys. 
+
+        for key in user.access_keys.all():
+            rtn['access-keys'].append(f"{key.access_key_id} ({key.status})")
+        return rtn
+        
+    def _describe_user_credentials(self):
+        rtn = {
+            'default-region': None,
+            'credentials-exist': None,
+        }
+        aws_config_dir = Path.home() / '.aws'
         aws_config_file = aws_config_dir / "config"
-
+        aws_credentials_file = aws_config_dir / "credentials"
         config_parser = ConfigParser()
         config_parser.read(aws_config_file)
-        if not self.iam_user in config_parser:
-            config_parser[f"profile {self.iam_user}"] = {
-                'region': region,
-                'output': output,
-            }
-            with aws_config_file.open('w') as aws_cfg:
-                config_parser.write(aws_cfg)
+        profile_name = f"profile {self.iam_user}"
+        try:
+            if config_parser[profile_name]:
+                rtn['default-region'] = config_parser[profile_name].get('region')
+        except KeyError:
+            logger.debug(f"No config for profile '{profile_name}' found at '{aws_config_file.absolute()}'")
+            rtn['default-region'] = ''
 
         credentials_parser = ConfigParser()
-        credentials_parser.read(aws_credentials_file)
-        if not self.iam_user in credentials_parser:
-            credentials_parser[self.iam_user] = {
-                'aws_access_key_id': access_key_pair.id,
-                'aws_secret_access_key': access_key_pair.secret,
-            }
-            with aws_credentials_file.open('w') as aws_creds:
-                credentials_parser.write(aws_creds)
-            aws_credentials_file.chmod(0o0600)
+        try:
+            credentials_parser.read(aws_credentials_file)
+            if credentials_parser[self.iam_user]:
+                rtn['credentials-exist'] = True
+            else:
+                rtn['credentials-exist'] = False
+        except KeyError:
+            logger.debug(f"No credentials found at '{aws_credentials_file.absolute()}'")
+            rtn['credentials-exist'] = False
+        finally:
+            return rtn
 
-
-
+#class IamState:
+#    def __init__(self):
+#        self.credentials = Credentials()
+#        self.iam_user = IamUser()
+#        self.iam_group = IamGroup()
+#        self.iam_policies = IamPolicies()
+#    class Credentials:
+#        def __init__(self):
+#            self.default_region = None
+#            self.exist = None
+#    class IamUser:
+#        def __init__(self):
+#            self.arn = None
+#            self.access_keys = []
+#    class IamGroup:
+#        def __init__(self):
+#            self.arn: None
+#            self.attached_policies: []
+#    class IamPolicies:
+#        def __init__(self):
+#            self.create: None, 
+#            self.describe: None, 
+#            self.update: None, 
+#            self.destroy: None, 
 
 PolicyData = {
     'create':{

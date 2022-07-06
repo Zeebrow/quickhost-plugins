@@ -14,10 +14,10 @@ from .constants import AWSConstants
 
 logger = logging.getLogger(__name__)
 
-class AWSInit:
+class AWSNetworking:
     DefaultFilter = { 'Name': 'tag:Name', 'Values': [ C.DEFAULT_APP_NAME ] }
     DefaultTag = { 'Value': f"{C.DEFAULT_APP_NAME}", 'Key': 'Name' }
-    TagSpec = lambda resource: { 'ResourceType': resource, 'Tags': [ AWSInit.DefaultTag ] }
+    TagSpec = lambda resource: { 'ResourceType': resource, 'Tags': [ AWSNetworking.DefaultTag ] }
 
     def __init__(self, app_name: str, client: boto3.client, dry_run=False):
         self.app_name = app_name
@@ -41,10 +41,10 @@ class AWSInit:
             vpc = ec2.create_vpc(
                 CidrBlock=cidr_block,
                 DryRun=self.dry_run,
-                TagSpecifications=[ AWSInit.TagSpec('vpc'), ]
+                TagSpecifications=[ AWSNetworking.TagSpec('vpc'), ]
             )
             vpc.wait_until_available()
-            vpc.create_tags(Tags=[AWSInit.DefaultTag])
+            vpc.create_tags(Tags=[AWSNetworking.DefaultTag])
             self.vpc_id = vpc.id
             vpc.reload()
             logger.debug(f"Done. {self.vpc_id=}")
@@ -58,7 +58,7 @@ class AWSInit:
             logger.debug("creating igw...")
             igw_id = self.client.create_internet_gateway(
                 DryRun=self.dry_run,
-                TagSpecifications=[ AWSInit.TagSpec('internet-gateway'), ]
+                TagSpecifications=[ AWSNetworking.TagSpec('internet-gateway'), ]
             )
             self.igw_id = get_single_result_id("InternetGateway", igw_id, plural=False)
             igw = ec2.InternetGateway(self.igw_id)
@@ -84,9 +84,9 @@ class AWSInit:
                 CidrBlock=C.DEFAULT_SUBNET_CIDR,
                 VpcId=self.vpc_id,
                 DryRun=self.dry_run,
-                TagSpecifications=[ AWSInit.TagSpec('subnet'), ]
+                TagSpecifications=[ AWSNetworking.TagSpec('subnet'), ]
             )
-            subnet.create_tags(Tags=[AWSInit.DefaultTag])
+            subnet.create_tags(Tags=[AWSNetworking.DefaultTag])
             self.subnet_id = subnet.id
             subnet.reload()
             logger.debug(f"Done. {self.subnet_id=}")
@@ -101,7 +101,7 @@ class AWSInit:
             route_table = vpc.create_route_table(
                 VpcId=self.vpc_id,
                 DryRun=self.dry_run,
-                TagSpecifications=[ AWSInit.TagSpec('route-table'), ]
+                TagSpecifications=[ AWSNetworking.TagSpec('route-table'), ]
             )
             logger.debug(f"creating route for igw ({self.igw_id})..")
             route = route_table.create_route(
@@ -142,13 +142,13 @@ class AWSInit:
     def get(self):
         ec2 = boto3.resource('ec2')
 
-        existing_vpcs = self.client.describe_vpcs( Filters=[ AWSInit.DefaultFilter ],)
+        existing_vpcs = self.client.describe_vpcs( Filters=[ AWSNetworking.DefaultFilter ],)
         vpc_id = get_single_result_id("Vpc", existing_vpcs)
 
-        existing_subnets = self.client.describe_subnets( Filters=[ AWSInit.DefaultFilter ],)
+        existing_subnets = self.client.describe_subnets( Filters=[ AWSNetworking.DefaultFilter ],)
         subnet_id = get_single_result_id("Subnet",existing_subnets)
 
-        existing_igws = self.client.describe_internet_gateways( Filters=[ AWSInit.DefaultFilter ],)
+        existing_igws = self.client.describe_internet_gateways( Filters=[ AWSNetworking.DefaultFilter ],)
         igw_id = get_single_result_id("InternetGateway",existing_igws)
 
         if igw_id is not None:
@@ -160,7 +160,7 @@ class AWSInit:
                     logger.error(f"Internet Gateway '{igw_id}' is not attached to the correct vpc!")
 
 
-        existing_rts = self.client.describe_route_tables( Filters=[ AWSInit.DefaultFilter ],)
+        existing_rts = self.client.describe_route_tables( Filters=[ AWSNetworking.DefaultFilter ],)
         rt_id = get_single_result_id("RouteTable",existing_rts)
 
         return {
@@ -173,7 +173,6 @@ class AWSInit:
         return self.get()
 
     def destroy(self):
-        # @@@ admin-like account or fail
         ec2 = boto3.resource('ec2')
         self.__dict__.update(self.get())
         vpc = ec2.Vpc(self.vpc_id)
