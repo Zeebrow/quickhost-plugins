@@ -88,7 +88,7 @@ class AWSHost:
         if userdata:
             run_instances_params['UserData'] = self.get_userdata(userdata)
         response = self.client.run_instances(**run_instances_params)
-        r_cleaned = quickhost.convert_datetime_to_string(response)
+        r_cleaned = quickhost.scrub_datetime(response)
         store_test_data(resource='AWSHost', action='create', response_data=r_cleaned)
         self.wait_for_hosts_to_start(tgt_count=num_hosts)
         return True
@@ -104,7 +104,7 @@ class AWSHost:
                 DryRun=False,
                 MaxResults=10,
             )
-            store_test_data(resource='AWSHost', action='describe', response_data=quickhost.convert_datetime_to_string(app_hosts))
+            store_test_data(resource='AWSHost', action='describe', response_data=quickhost.scrub_datetime(app_hosts))
             for r in app_hosts['Reservations']:
                 for host in r['Instances']:
                     if host['State']['Name'] in ['running', 'pending']:
@@ -159,14 +159,14 @@ class AWSHost:
             DryRun=False,
             MaxResults=10,
         )
-        store_test_data(resource='AWSHost', action='describe', response_data=quickhost.convert_datetime_to_string(all_hosts))
+        store_test_data(resource='AWSHost', action='describe', response_data=quickhost.scrub_datetime(all_hosts))
         # fishy
         instance_ids = []
         for r in all_hosts['Reservations']:
             for host in r['Instances']:
                 if host['State']['Name'] in states:
                     #running_instances.append({'instance-id': host['InstanceId'], 'state': host['State']['Name']})
-                    app_instances.append(quickhost.convert_datetime_to_string(host))
+                    app_instances.append(quickhost.scrub_datetime(host))
                     inst = self._descibe_instance(host=host)
                     print(json.dumps(inst))
                     instance_ids.append(inst['instance_id'])
@@ -224,7 +224,7 @@ class AWSHost:
         return data
 
     def get_host_count(self):
-        app_hosts = quickhost.convert_datetime_to_string(self.client.describe_instances(
+        app_hosts = quickhost.scrub_datetime(self.client.describe_instances(
             Filters=[
                 { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
                 { 'Name': f"instance-state-name", 'Values': [HostState.running] },
@@ -249,7 +249,7 @@ class AWSHost:
         other_hosts = []
         tgt_count = len(tgt_instances)
         while not True:
-            app_hosts = quickhost.convert_datetime_to_string(self.client.describe_instances(
+            app_hosts = quickhost.scrub_datetime(self.client.describe_instances(
                 Filters=[
                     { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
                     { 'Name': f"instance-state-name", 'Values': [HostState.terminated, HostState.shutting_down] },
@@ -286,7 +286,7 @@ class AWSHost:
         waiting_on_hosts = []
         other_hosts = []
         while True:
-            app_hosts = quickhost.convert_datetime_to_string(self.client.describe_instances(
+            app_hosts = quickhost.scrub_datetime(self.client.describe_instances(
                 Filters=[
                     { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
                     { 'Name': f"instance-state-name", 'Values': [HostState.running, HostState.pending] },

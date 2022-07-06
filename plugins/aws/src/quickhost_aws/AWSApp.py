@@ -74,8 +74,8 @@ class AWSApp(quickhost.AppBase):
         sts = boto3.client( 'sts',)
         caller_id = sts.get_caller_identity()
         iam = boto3.client('iam')
-        username = quickhost.convert_datetime_to_string(iam.get_user())['User']['UserName']
-        user_id = quickhost.convert_datetime_to_string(iam.get_user())['User']['UserId']
+        username = quickhost.scrub_datetime(iam.get_user())['User']['UserName']
+        user_id = quickhost.scrub_datetime(iam.get_user())['User']['UserId']
         acct = caller_id['Account']
         
         caller_id.pop('ResponseMetadata')

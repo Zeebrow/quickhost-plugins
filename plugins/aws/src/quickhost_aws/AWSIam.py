@@ -6,7 +6,7 @@ from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
 
-from quickhost import convert_datetime_to_string
+from quickhost import scrub_datetime
 
 from .utilities import get_single_result_id, check_running_as_user
 from .constants import AWSConstants
@@ -142,7 +142,7 @@ class Iam:
             'update': None,
             'destroy': None,
         }
-        qh_policies = convert_datetime_to_string(self.client.list_policies(
+        qh_policies = scrub_datetime(self.client.list_policies(
             PathPrefix='/quickhost/',
         ))['Policies']
         describe_policy_arn = None
