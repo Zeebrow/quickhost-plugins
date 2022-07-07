@@ -349,8 +349,7 @@ class Iam(AWSResourceBase):
                 logger.info(f"User '{self.iam_user}' was removed from Group '{self.iam_group}'")
             else:
                 logger.error(f"Unknown error caught while deleting group: {e}")
-            return rtn #return before trying to get nobody's access keys. 
-
+            return rtn 
         for key in user.access_keys.all():
             rtn['access-keys'].append(f"{key.access_key_id} ({key.status})")
         return rtn
@@ -420,6 +419,8 @@ PolicyData = {
                 "Effect": "Allow",
                 "Action": [
                     "ec2:CreateKeyPair",
+                    "ec2:CreateTags",
+                    "ec2:RunInstances",
                     "ec2:AuthorizeSecurityGroupIngress",
                     "ec2:CreateSecurityGroup"
                 ],

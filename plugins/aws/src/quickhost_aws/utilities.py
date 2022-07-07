@@ -60,3 +60,5 @@ def handle_client_error(e: ClientError):
     if code == 'UnauthorizedOperation':
         logger.error(f"({code}): {e.operation_name}")
 
+class Null:
+    pass

@@ -43,7 +43,7 @@ class KP(AWSResourceBase):
         
     def create(self, ssh_key_filepath=None):
         """Make a new ec2 keypair named for app"""
-        print('creating ec2 key pair...', end='')
+        existing_key_pair = self.describe()
         if ssh_key_filepath is None:
             # not overriden from config, set default
             # @@@ just use ~/.ssh...
@@ -54,35 +54,42 @@ class KP(AWSResourceBase):
             else:
                 tgt_file = Path(ssh_key_filepath)
         if tgt_file.exists():
-            logger.error(f"pem file '{tgt_file.absolute()}' already exists")
+            logger.warning(f"overwriting pem file '{tgt_file.absolute()}'")
+
+        if existing_key_pair['key_id'] is None:
+            raise Exception("Failed to get key information")
+        elif existing_key_pair['key_id'] == '':
+            new_key = self.client.create_key_pair(
+                KeyName=self.key_name,
+                DryRun=False,
+                KeyType='rsa',
+                TagSpecifications=[
+                    {
+                        'ResourceType': 'key-pair',
+                        'Tags': [
+                            { 'Key': C.DEFAULT_APP_NAME, 'Value': self.app_name},
+                        ]
+                    },
+                ],
+            )
+            with tgt_file.open('w') as pemf:
+                pemf.writelines(new_key['KeyMaterial'])
+                os.chmod(tgt_file.absolute(), 0o600)
+            logger.debug(f"saved private key to file '{tgt_file.absolute()}'")
+            self.key_id = new_key['KeyPairId']
+            self.fingerprint = new_key['KeyFingerprint']
+            del new_key
+            print(f"Created new key pair ({self.key_id})")
+            return True
+        else:
+            logger.debug(f"key exists with id {existing_key_pair['key_id']}")
             return False
 
-        new_key = self.client.create_key_pair(
-            KeyName=self.key_name,
-            DryRun=False,
-            KeyType='rsa',
-            TagSpecifications=[
-                {
-                    'ResourceType': 'key-pair',
-                    'Tags': [
-                        { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name},
-                    ]
-                },
-            ],
-        )
-
-        with tgt_file.open('w') as pemf:
-            pemf.writelines(new_key['KeyMaterial'])
-        if sys.platform == 'linux':
-            os.chmod(tgt_file.absolute(), 0o600)
-        logger.debug(f"saved private key to file '{tgt_file.absolute()}'")
-        self.key_id = new_key['KeyPairId']
-        self.fingerprint = new_key['KeyFingerprint']
-        del new_key
-        print(f"done ({self.key_id})")
-        return
-
     def describe(self):
+        rtn = {
+            'key_id': None,
+            'fingerprint': None
+        }
         try:
             existing_key = self.client.describe_key_pairs(
                 KeyNames=[ self.app_name ],
@@ -91,26 +98,19 @@ class KP(AWSResourceBase):
                 # but it throws an error
                 IncludePublicKey=True
             )
-            key_id = existing_key['KeyPairs'][0]['KeyPairId']
-            fingerprint = existing_key['KeyPairs'][0]['KeyFingerprint']
+            rtn['key_id']           = existing_key['KeyPairs'][0]['KeyPairId']
+            rtn['key_fingerprint']  = existing_key['KeyPairs'][0]['KeyFingerprint']
+            return rtn
         except ClientError as e:
             code = e['Error']['Code']
             if code == 'UnauthorizedOperation':
                 logger.error(f"({code}): {e.operation_name}")
-                return {
-                    'key_id': '?',
-                    'key_fingerprint': '?'
-                }
+                return rtn
             else:
                 logger.error(f"(Key Pair) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
-                return {
-                    'key_id': None,
-                    'fingerprint': None
-                }
-        return {
-                'key_id': key_id,
-                'key_fingerprint': fingerprint
-        }
+                return rtn
+        finally:
+            return rtn
 
     def destroy(self, ssh_key_file=None) -> bool:
         if not ssh_key_file:

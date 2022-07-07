@@ -9,7 +9,7 @@ import botocore.exceptions
 from quickhost.temp_data_collector import store_test_data
 
 from .constants import *
-from .utilities import QH_Tag
+from .utilities import QH_Tag, Null
 #from .temp_data_collector import store_test_data
 from .AWSResource import AWSResourceBase
 
@@ -23,9 +23,6 @@ class SG(AWSResourceBase):
         self.ec2 = self.get_resource('ec2')
         self.app_name = app_name
         self.vpc_id = vpc_id
-#        self.ports = None
-#        self.cidrs = None
-#        self.dry_run = dry_run
 
     def get_security_group_id(self) -> str:
         dsg = None
@@ -36,6 +33,7 @@ class SG(AWSResourceBase):
                     { 'Name': 'group-name', 'Values': [ self.app_name, ] },
                 ],
             )
+            return dsg['SecurityGroups'][0]['GroupId']
         except botocore.exceptions.ClientError as e:
             logger.debug(f"Could not get sg for app '{self.app_name}':\n{e}")
             return None
@@ -45,11 +43,7 @@ class SG(AWSResourceBase):
             logger.debug(f"No security groups found for app '{self.app_name}'")
             return None
 
-        #store_test_data(resource='SG', action='describe', response_data=_dsg)
-        return dsg['SecurityGroups'][0]['GroupId']
-
     def create(self, cidrs, ports, dry_run=False):
-        print('creating sg...', end='')
         try:
             sg = self.client.create_security_group(
                 Description="Made by quickhost",
@@ -62,15 +56,13 @@ class SG(AWSResourceBase):
                 ]}],
                 DryRun=dry_run
             )
+            self.sgid = sg['GroupId']
+            self._add_ingress(cidrs, ports)
+            #store_test_data(resource='SG', action='create', response_data=_sg)
+            return sg['GroupId']
         except botocore.exceptions.ClientError as e:
             logger.debug(f"Security Group already exists for '{self.app_name}':\n{e}")
-            logger.debug(f"{self.get_security_group_id()=}")
             return self.get_security_group_id()
-        print(f"done ({sg['GroupId']})")
-        self.sgid = sg['GroupId']
-        self._add_ingress(cidrs, ports)
-        #store_test_data(resource='SG', action='create', response_data=_sg)
-        return sg['GroupId']
 
     def destroy(self):
         try:
@@ -79,16 +71,13 @@ class SG(AWSResourceBase):
                 logger.debug(f"No security group found for app '{self.app_name}'")
                 return None
             self.client.delete_security_group( GroupId=sg_id)
-            print(f"deleting security group '{sg_id}'")
+            logger.info(f"deleting security group '{sg_id}'")
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
                 logger.info(f"No security group found for app '{self.app_name}', skipping...")
                 return
             elif e.response['Error']['Code'] == 'UnauthorizedOperation':
                 logger.error(f"({e.response['Error']['Code']}): {e.operation_name}")
-#                logger.error(f"Unauthorized to get security group info: {e.response['Error']['Code']}: {e.response['Error']['Message']}")
-#                logger.error(f"{e.args=}")
-#                logger.error(f"{e.operation_name=}")
                 return
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
@@ -96,7 +85,6 @@ class SG(AWSResourceBase):
         return
 
     def _add_ingress(self, cidrs, ports):
-        print('adding sg ingress...', end='')
         try:
             perms = []
             for port in ports:
@@ -111,7 +99,7 @@ class SG(AWSResourceBase):
                 IpPermissions=perms,
                 DryRun=False
             )
-            print(f"done ({[i for i in cidrs]}:{[p for p in ports]})")
+            #print(f"done ({[i for i in cidrs]}:{[p for p in ports]})")
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
                 logger.info(f"No security group found for app '{self.app_name}', skipping...")
@@ -122,12 +110,13 @@ class SG(AWSResourceBase):
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
                 return
-        #store_test_data(resource='SG', action='_add_ingress', response_data=response)
 
     def describe(self):
-        response = None
-        ports = []
-        cidrs = []
+        rtn = {
+            'sgid': Null, #giving this a try
+            'ports': [],
+            'cidrs': [],
+        }
         try:
             response = self.client.describe_security_groups(
                 Filters=[
@@ -139,7 +128,6 @@ class SG(AWSResourceBase):
             for p in response['SecurityGroups'][0]['IpPermissions']:
                 for ipr in p['IpRanges']:
                     cidrs.append(ipr['CidrIp'])
-
                 if p['ToPort'] == p['FromPort']:
                     ports.append("{}/{}".format(
                         p['ToPort'],
@@ -151,34 +139,17 @@ class SG(AWSResourceBase):
                         p['FromPort'],
                         p['IpProtocol']
                     ))
-
+            rtn['sgid']     = response['SecurityGroups'][0]['GroupId'] 
+            rtn['ports']    = ports
+            rtn['cidrs']    = cidrs
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
                 self.sgid = None
                 logger.error(f"No security group found for app '{self.app_name}' (does the app exist?)")
-                return {
-                    'sgid': None,
-                    'ports': [None],
-                    'cidrs': [None],
-                }
+                rtn['sgid'] = None
             if e.response['Error']['Code'] == 'UnauthorizedOperation':
                 logger.error(f"Unauthorized to get security group info: {e.response['Error']['Code']}: {e.response['Error']['Message']}")
-                return {
-                    'sgid': '?',
-                    'ports': ['?'],
-                    'cidrs': ['?'],
-                }
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
-                return {
-                    'sgid': None,
-                    'ports': [None],
-                    'cidrs': [None],
-                }
-        for ip in cidrs:
-            print(f"{ip}:{[p for p in ports]}")
-        return {
-            'sgid': self.sgid,
-            'ports': ports,
-            'cidrs': cidrs
-        }
+        finally:
+            return rtn

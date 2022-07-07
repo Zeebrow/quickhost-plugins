@@ -24,8 +24,6 @@ class HostState:
     terminated = 'terminated' 
     stopping = 'stopping' 
     stopped = 'stopped' 
-
-    # @@@TODO: dunders?
     @classmethod
     def allofem(self):
         return [
@@ -36,8 +34,6 @@ class HostState:
             "stopping",
             "stopped",
         ]
-
-    # @@@TODO: dunders?
     @classmethod
     def butnot(self,*states):
         rtn = list(HostState.allofem())
@@ -62,8 +58,9 @@ class AWSHost(AWSResourceBase):
             print("No ami specified, getting latest al2...", end='')
             image_id = self.get_latest_image()
             print("Done. ({image_id})")
-        ##
+        print()
         print(f"starting hosts...")
+        print( "*****************")
         run_instances_params = {
             'ImageId': image_id,
             'InstanceType': instance_type,

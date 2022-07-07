@@ -85,21 +85,21 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             print('Aborted')
             exit(3)
         qh_iam = Iam(profile=params['profile'])
-        print(json.dumps(qh_iam.describe(), indent=2))
+        #print(json.dumps(qh_iam.describe(), indent=2))
         qh_iam.create()
         #qh_iam.destroy()
         #qh_iam.describe()
-        print(json.dumps(qh_iam.describe(), indent=2))
+        #print(json.dumps(qh_iam.describe(), indent=2))
         networking_params= AWSNetworking(
             app_name=self.app_name,
             profile=params['profile']
         )
-        print(json.dumps(networking_params.describe(), indent=2))
+        #print(json.dumps(networking_params.describe(), indent=2))
         p = networking_params.create()
         #p = networking_params.destroy()
         #p = networking_params.get()
-        print(p)
-        print(json.dumps(networking_params.describe(), indent=2))
+        #print(p)
+        #print(json.dumps(networking_params.describe(), indent=2))
         return 
 
     def load_default_config(self):
@@ -145,23 +145,9 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         #parser.add_argument("-f", "--user-key-csv", required=False, action='store_true', help="path to the rootkey.csv file downloaded when creating root account credentials")
         return init_parser
 
-    def describe_parser_arguments(self, parser: ArgumentParser):
-        pass
-
-    def update_parser_arguments(self, parser: ArgumentParser):
-        parser.add_argument("-y", "--dry-run", required=False, action='store_true', help="prevents any resource creation when set")
-        parser.add_argument("-p", "--port", required=False, type=int, action='append', default=SUPPRESS, help="add an open tcp port to security group, applied to all ips")
-        parser.add_argument("--ip", required=False, action='append', help="additional ipv4 to allow through security group. all ports specified with '--port' are applied to all ips specified with --ip if a cidr is not included, it is assumed to be /32")
-        parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
-        parser.add_argument("--ami", required=False, default=SUPPRESS, help="change the ami to launch, see source-aliases for getting lastest")
-        parser.add_argument("-u", "--userdata", required=False, default=SUPPRESS, help="path to optional userdata file")
-        return None
-
     def get_make_parser(self):
         """arguments for `make`"""
         make_parser = ArgumentParser("AWS make", add_help=False)
-
-        #make_parser.add_argument(f"--{AWSApp.plugin_name}", dest="app_name")
         make_parser.add_argument("--vpc-id", required=False, default=SUPPRESS, help="specify a VpcId to choose the vpc in which to launch hosts")
         make_parser.add_argument("--subnet-id", required=False, default=SUPPRESS, help="specify a SubnetId to choose the subnet in which to launch hosts")
         make_parser.add_argument("-c", "--host-count", required=False, default=1, help="number of hosts to create")
@@ -172,8 +158,24 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         make_parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
         make_parser.add_argument("--ami", required=False, default=SUPPRESS, help="change the ami to launch, see source-aliases for getting lastest")
         make_parser.add_argument("-u", "--userdata", required=False, default=SUPPRESS, help="path to optional userdata file")
-
         return make_parser
+
+    def get_describe_parser(self):
+        parser= ArgumentParser("AWS describe", add_help=False)
+        return parser
+
+    def update_parser_arguments(self, parser: ArgumentParser):
+        parser.add_argument("-y", "--dry-run", required=False, action='store_true', help="prevents any resource creation when set")
+        parser.add_argument("-p", "--port", required=False, type=int, action='append', default=SUPPRESS, help="add an open tcp port to security group, applied to all ips")
+        parser.add_argument("--ip", required=False, action='append', help="additional ipv4 to allow through security group. all ports specified with '--port' are applied to all ips specified with --ip if a cidr is not included, it is assumed to be /32")
+        parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
+        parser.add_argument("--ami", required=False, default=SUPPRESS, help="change the ami to launch, see source-aliases for getting lastest")
+        parser.add_argument("-u", "--userdata", required=False, default=SUPPRESS, help="path to optional userdata file")
+        return None
+
+    def get_destroy_parser(self):
+        parser= ArgumentParser("AWS destroy", add_help=False)
+        return parser
 
     @classmethod
     def parser_arguments(subparser: ArgumentParser) -> None:
@@ -187,11 +189,28 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         return QHExit.OK
 
     def run_make(self, args: dict):
-        if not check_running_as_user():
-            return QHExit.NOT_QH_USER 
         logger.debug('make')
+        prompt_continue = input("proceed?")
+        if not prompt_continue == 'y':
+            print("aborted.")
+            return QHExit.ABORTED
         params = self._parse_make(args)
         self.create(args)
+        return QHExit.OK
+
+    def run_describe(self, args: dict):
+        logger.debug('describe')
+        self.describe(args)
+        return QHExit.OK
+
+    def run_destroy(self, args: dict):
+        logger.debug('destroy')
+        prompt_continue = input("proceed?")
+        if not prompt_continue == 'y':
+            print("aborted.")
+            return QHExit.ABORTED
+        params = self._parse_destroy(args)
+        self.destroy(params)
         return QHExit.OK
 
     def run(self, args: dict):
@@ -284,8 +303,8 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             self.key_name = args['key_name']
             make_params['key_name'] = args['key_name']
         else:
-            self.key_name = args['app_name']
-            make_params['key_name'] = args['app_name']
+            self.key_name = self.app_name
+            make_params['key_name'] = self.app_name
 
         # ec2 key pem file
         if 'ssh_key_filepath' in flags:
@@ -329,8 +348,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         flags = args.keys()
         return {
             'app_name': self.app_name,
-            'config_file': self.config_file,
-            'dry_run': False,
+            'config_file': self.config_file
         }
 
     def _print_loaded_args(self, d: dict, heading=None) -> None:
@@ -361,10 +379,11 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     def describe(self, args: dict) -> None:
         self._parse_describe()
+        self.load_default_config()
 
-        sts = boto3.client( 'sts',)
+        sts = self.get_client( 'sts',)
         caller_id = sts.get_caller_identity()
-        iam = boto3.client('iam')
+        iam = self.get_client('iam')
         all_users = iam.list_users()
         running_as_user_id = caller_id['UserId']
         running_as_user = ''
@@ -377,28 +396,15 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             "invoking_user_id": running_as_user_id,
         }
         sg = SG(
-            client=self._client,
-            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         )
         sg_vals = sg.describe()
-        kp = KP(
-            client=self._client,
-            ec2_resource=self._ec2_resource,
-            app_name=self.app_name,
-        )
+        kp = KP( app_name=self.app_name,)
         kp_vals = kp.describe()
-        host = AWSHost(
-            client=self._client,
-            ec2_resource=self._ec2_resource,
-            app_name=self.app_name,
-        )
+        host = AWSHost( app_name=self.app_name,)
         host_vals = host.describe()
-        init = AWSNetworking(
-            app_name=self.app_name,
-            client=self._client
-        )
+        init = AWSNetworking( app_name=self.app_name,)
         # idk man
         self._print_loaded_args(init.describe(),heading=f"global params")
         self._print_loaded_args(iam_vals)
@@ -410,28 +416,21 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         #self._print_loaded_args(heading=f"Params for app '{self.app_name}'")
 
     def create(self, args: dict):
+        self.load_default_config()
         p = self._parse_make(args)
         kp = KP(
-            client=self._client,
-            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
-#            dry_run=self.dry_run
         )
         kp.create()
         sg = SG(
-            client=self._client,
-            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         )
-        self.sgid = sg.create(
+        sgid = sg.create(
             ports=self.ports,
             cidrs=self.cidrs
-#            dry_run=self.dry_run,
         )
         host = AWSHost(
-            client=self._client,
-            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
         )
         if self.ami is None:
@@ -443,7 +442,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             image_id=self.ami,
             instance_type=self.instance_type,
             subnet_id=self.subnet_id,
-            sgid=self.sgid,
+            sgid=sgid,
             key_name=self.key_name,
             userdata=self.userdata,
             dry_run=self.dry_run
@@ -456,24 +455,17 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         pass
 
     def destroy(self, args: dict):
+        self.load_default_config()
         kp = KP(
-            client=self._client,
-            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
             # @@@ ...
             #ssh_key_filepath=params['ssh_key_filepath'],
         ).destroy()
-        hosts = AWSHost(
-            client=self._client,
-            ec2_resource=self._ec2_resource,
-            app_name=self.app_name,
-        )
+        hosts = AWSHost( app_name=self.app_name,)
         hc = hosts.get_host_count()
         print(f"{hc=}")
         hosts.destroy()
         sg = SG(
-            client=self._client,
-            ec2_resource=self._ec2_resource,
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         ).destroy()
