@@ -338,9 +338,8 @@ class Iam(AWSResourceBase):
             'arn': '',
             'attached-policies': [],
         }
-        iam = self.iam
         try:
-            group = iam.Group(self.iam_group)
+            group = self.iam.Group(self.iam_group)
             rtn['arn'] = group.arn
         except ClientError as e:
             code = e.__dict__['response']['Error']['Code']
@@ -436,8 +435,12 @@ PolicyData = lambda QUICKHOST_ACCOUNT: {
                     "iam:GetGroup",
                     "iam:ListUsers",
                     "iam:ListAccessKeys",
+                    "iam:ListAttachedGroupPolicies",
                 ],
-                "Resource": f"arn:aws:iam::{QUICKHOST_ACCOUNT}:user/quickhost/*"
+                "Resource": [
+                    f"arn:aws:iam::{QUICKHOST_ACCOUNT}:user/quickhost/*",
+                    f"arn:aws:iam::{QUICKHOST_ACCOUNT}:group/quickhost/*"
+                ]
             },
             {
                 "Sid": "quickhostDescribePolicies",

@@ -101,9 +101,10 @@ class QuickhostUnauthorized(Exception):
 
 class Arn:
     def __init__(self, arn):
-        if self.is_arn(arn):
+        if self.is_arn(arn) and arn is not None:
             self.error = None
             self.arn = str(arn)
+            (_, _, _, _, self.account, self.resource) = arn.split(":")
         else:
             self.error = arn
             self.arn = None
@@ -112,7 +113,7 @@ class Arn:
 
     @classmethod
     def is_arn(self, arn:str):
-        if arn is None or type(arn) != str or not arn.startswith("arn:") or len(arn.split(":")) != 6:
+        if type(arn) != str or not arn.startswith("arn:") or len(arn.split(":")) != 6:
             return False
         return True
 

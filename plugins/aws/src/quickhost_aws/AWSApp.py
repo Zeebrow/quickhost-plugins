@@ -21,7 +21,7 @@ from .AWSHost import AWSHost
 from .AWSKeypair import KP
 from .AWSNetworking import AWSNetworking
 from .constants import AWSConstants
-from .utilities import check_running_as_user, get_ssh, QuickhostUnauthorized
+from .utilities import check_running_as_user, get_ssh, QuickhostUnauthorized, Arn
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +69,18 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             region=region,
             profile=profile
         ).describe(use_cache=cache_ok)
+        sts = self.get_client(
+            'sts',
+            region=region,
+            profile=profile
+        )[1]
+        caller_info = sts.get_caller_identity()
+        _ = caller_info.pop('ResponseMetadata')
         self.vpc_id = networking_params['vpc_id']
         self.subnet_id = networking_params['subnet_id']
+        calling_user_arn = Arn(caller_info['Arn'])
+        self.user = calling_user_arn.resource
+        self.account = calling_user_arn.account
         return networking_params
 
     def _old_load_default_config(self):
@@ -131,6 +141,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     def get_describe_parser(self):
         parser= ArgumentParser("AWS describe", add_help=False)
+        parser.add_argument("--region", required=False, choices=AWSConstants.AVAILABLE_REGIONS, default=AWSConstants.DEFAULT_REGION, help="region to launch the host into.")
         return parser
 
     def update_parser_arguments(self, parser: ArgumentParser):
@@ -170,7 +181,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     def run_make(self, args: dict):
         logger.debug('make')
-        print(f"{args=}")
         prompt_continue = input("proceed? (y/n)")
         if not prompt_continue == 'y':
             print("aborted.")
@@ -180,9 +190,18 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         return QHExit.OK
 
     def run_describe(self, args: dict):
-        logger.debug('describe')
-        self.describe(args)
-        return QHExit.OK
+        logger.debug('run describe')
+        rc = QHExit.GENERAL_FAILURE
+        stdout = None
+        stderr = None
+        try:
+            rc = self.describe(args)
+            stderr = ''
+        except QuickhostUnauthorized as e:
+            stderr = "Unauthorized: {}".format(e)
+            stderr += "\nTry specifiying a different user with --profile."
+            rc = QHExit.FAIL_AUTH
+        return (rc, stdout, stderr)
 
     def run_destroy(self, args: dict):
         logger.debug('destroy')
@@ -240,7 +259,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         return init_params
     
     def _parse_make(self, args: dict):
-        print(f"{args=}")
         make_params = {}
         flags = args.keys()
         # ports ingress
@@ -288,6 +306,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             make_params['ssh_key_filepath'] = f"{self.app_name}.pem"
 
         # the rest 
+        # setdefault()
         if 'dry_run' in flags:
             make_params['dry_run'] = args['dry_run']
         if 'host_count' in flags:
@@ -306,10 +325,8 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         return make_params
 
 
-    def _parse_describe(self):
-        #flags = args.keys()
-        self.dry_run = False
-        return {}
+    def _parse_describe(self, args: dict) -> dict:
+        return args
         
     def _parse_destroy(self, args: dict):
         destroy_params = {}
@@ -366,7 +383,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             exit(3)
         qh_iam = Iam(**params)
         #print(json.dumps(qh_iam.describe(), indent=2))
-        #qh_iam.destroy()
+        qh_iam.destroy()
         qh_iam.create()
         #qh_iam.describe()
         #print(json.dumps(qh_iam.describe(), indent=2))
@@ -383,28 +400,40 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         return 
 
     def describe(self, args: dict) -> None:
-        self._parse_describe()
-        networking_params = self.load_default_config()
+        params = self._parse_describe(args)
+        networking_params = self.load_default_config(
+            region=params['region']
+        )
 
-        sts = self.get_client( 'sts',)
-        caller_id = sts.get_caller_identity()
-        iam_vals = Iam().describe(verbiage=1)
+        iam_vals = Iam(
+            region=params['region'],
+        ).describe(verbiage=1)
         sg_vals = SG(
+            region=params['region'],
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         ).describe()
-        kp_vals = KP( app_name=self.app_name,).describe()
-        host_vals = AWSHost( app_name=self.app_name,).describe()
+        kp_vals = KP(
+            app_name=self.app_name,
+            region=params['region']
+        ).describe()
+        host_vals = AWSHost(
+            app_name=self.app_name,
+            region=params['region']
+        ).describe()
         # idk man
+        caller_info = {
+            'account': self.account,
+            'invoking user': '/'.join(self.user.split('/')[1:])
+        }
         self._print_loaded_args(networking_params,heading=f"global params")
-        self._print_loaded_args(caller_id)
+        self._print_loaded_args(caller_info)
         self._print_loaded_args(iam_vals)
         self._print_loaded_args(sg_vals)
         self._print_loaded_args(kp_vals)
         for i,host in enumerate(host_vals):
             self._print_loaded_args(host, heading=f"host {i}")
-            #get_ssh(kp_vals['key_filepath'], h['public_ip'])
-        #self._print_loaded_args(heading=f"Params for app '{self.app_name}'")
+        return QHExit.OK
 
     def create(self, args: dict):
         params = self._parse_make(args)
