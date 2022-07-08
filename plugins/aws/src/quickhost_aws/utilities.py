@@ -62,3 +62,57 @@ def handle_client_error(e: ClientError):
 
 class Null:
     pass
+class UNDEFINED:
+    pass
+
+def quickmemo(f, *args, **kwargs):
+    """
+    named to confer the function's relatively shitty nature
+    """
+    cache = {}
+    def foo(*args, **kwargs):
+        if 'use_cache' in kwargs:
+            if kwargs['use_cache'] == False:
+                return f(*args, **kwargs)
+        if 'a' not in cache:
+            cache['a'] = f(*args, **kwargs)
+            return cache['a']
+        else:
+            logger.debug("cache hit")
+        return cache['a']
+    return foo
+
+class QuickhostUnauthorized(Exception):
+    """
+    https://github.com/boto/botocore/blob/develop/botocore/exceptions.py
+    thanks!
+    """
+    def fmt(self):
+        return "{}:({}) {}".format(
+            self.username,
+            self.operation,
+            self.message
+        )
+    def __init__(self, username, operation, message=''):
+        self.username = username
+        self.operation = operation
+        self.message = message
+        Exception.__init__(self, self.fmt())
+
+class Arn:
+    def __init__(self, arn):
+        if self.is_arn(arn):
+            self.error = None
+            self.arn = str(arn)
+        else:
+            self.error = arn
+            self.arn = None
+    def __repr__(self):
+        return str(self.arn)
+
+    @classmethod
+    def is_arn(self, arn:str):
+        if arn is None or type(arn) != str or not arn.startswith("arn:") or len(arn.split(":")) != 6:
+            return False
+        return True
+

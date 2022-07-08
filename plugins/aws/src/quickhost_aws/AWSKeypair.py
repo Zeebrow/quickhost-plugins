@@ -11,16 +11,19 @@ import quickhost
 from quickhost import APP_CONST as C
 from quickhost.temp_data_collector import store_test_data
 
-from .utilities import get_single_result_id, handle_client_error
+from .utilities import get_single_result_id, handle_client_error, UNDEFINED
 from .AWSResource import AWSResourceBase
+from .constants import AWSConstants
 
 logger = logging.getLogger(__name__)
 
 class KP(AWSResourceBase):
     #def __init__(self, client: any, ec2_resource: any, app_name: str, ssh_key_filepath=None, key_name=None, dry_run=True):
-    def __init__(self, app_name: str):
-        self.client = self.get_client('ec2')
-        self.ec2 = self.get_resource('ec2')
+    def __init__(self, app_name: str, profile=AWSConstants.DEFAULT_IAM_USER, region=AWSConstants.DEFAULT_REGION):
+        self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
+        self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
+        if self._client_caller_info == self._resource_caller_info:
+            self.caller_info = self._client_caller_info
         self.app_name = app_name
         self.key_name = app_name 
         self.key_filepath = C.DEFAULT_SSH_KEY_FILE_DIR / f"{self.key_name}.pem"
@@ -56,9 +59,9 @@ class KP(AWSResourceBase):
         if tgt_file.exists():
             logger.warning(f"overwriting pem file '{tgt_file.absolute()}'")
 
-        if existing_key_pair['key_id'] is None:
+        if existing_key_pair['key_id'] is UNDEFINED:
             raise Exception("Failed to get key information")
-        elif existing_key_pair['key_id'] == '':
+        elif existing_key_pair['key_id'] == None:
             new_key = self.client.create_key_pair(
                 KeyName=self.key_name,
                 DryRun=False,
@@ -87,8 +90,8 @@ class KP(AWSResourceBase):
 
     def describe(self):
         rtn = {
-            'key_id': None,
-            'fingerprint': None
+            'key_id': UNDEFINED,
+            'fingerprint': UNDEFINED, 
         }
         try:
             existing_key = self.client.describe_key_pairs(
@@ -102,15 +105,18 @@ class KP(AWSResourceBase):
             rtn['key_fingerprint']  = existing_key['KeyPairs'][0]['KeyFingerprint']
             return rtn
         except ClientError as e:
-            code = e['Error']['Code']
+            code = e.__dict__['response']['Error']['Code']
             if code == 'UnauthorizedOperation':
                 logger.error(f"({code}): {e.operation_name}")
                 return rtn
-            else:
-                logger.error(f"(Key Pair) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
+            if code == 'InvalidKeyPair.NotFound':
+                logger.error(f"({code}): {e.operation_name}")
+                rtn['key_id'] = None
+                rtn['fingerprint'] = None
                 return rtn
-        finally:
-            return rtn
+            else:
+                logger.error(f"(Key Pair) Unhandled botocore client exception: ({code}): {e}")
+                return rtn
 
     def destroy(self, ssh_key_file=None) -> bool:
         if not ssh_key_file:

@@ -8,7 +8,7 @@ from botocore.exceptions import ClientError
 
 from quickhost import scrub_datetime
 
-from .utilities import get_single_result_id, check_running_as_user
+from .utilities import get_single_result_id, check_running_as_user, QuickhostUnauthorized, Arn
 from .constants import AWSConstants
 from .AWSResource import AWSResourceBase
 
@@ -18,13 +18,18 @@ class Iam(AWSResourceBase):
     """
     Manage AWS IAM (account-global) quickhost resources' lifecycle
     """
-    def __init__(self, profile=None):
-        self.client = self.get_client('iam', profile=profile)
-        self.iam = self.get_resource('iam', profile=profile)
+    def __init__(self, profile=AWSConstants.DEFAULT_IAM_USER, region=AWSConstants.DEFAULT_REGION):
+        self._client_caller_info, self.client = self.get_client('iam', profile=profile, region=region)
+        self._resource_caller_info, self.iam = self.get_resource('iam', profile=profile, region=region)
+        if self._client_caller_info == self._resource_caller_info:
+            self.caller_info = self._client_caller_info
         self.iam_user = AWSConstants.DEFAULT_IAM_USER
         self.iam_group = f"{AWSConstants.DEFAULT_IAM_USER}s"
 
     def create(self):
+        if self.caller_info['username'] == AWSConstants.DEFAULT_IAM_USER:
+            logger.warning(f"The default quickhost user is not allowed to 'init'!")
+            raise QuickhostUnauthorized(f"The default quickhost user is not allowed to 'init'!")
         current_policies = self._describe_user_credentials()
         self.create_user_group()
         self._create_user_config()
@@ -32,13 +37,16 @@ class Iam(AWSResourceBase):
         self.create_policies()
         self.attach_policies_and_group()
 
-    def describe(self):
-        rtn = {
-            'credentials': self._describe_user_credentials(),
-            'iam-user': self._describe_iam_user(),
-            'iam-group': self._describe_iam_group(),
-            'iam-policies': self._describe_iam_policies(),
-        }
+    def describe(self, verbiage=4):
+        if verbiage < 1:
+            rtn = { 'iam-user': self._describe_iam_user(), }
+        elif verbiage >= 1:
+            rtn = {
+                'credentials': self._describe_user_credentials(),
+                'iam-user': self._describe_iam_user(),
+                'iam-group': self._describe_iam_group(),
+                'iam-policies': self._describe_iam_policies(),
+            }
         return rtn
 
     def destroy(self):
@@ -46,7 +54,6 @@ class Iam(AWSResourceBase):
         policy_arns = self.qh_policy_arns()
         user = iam.User(self.iam_user)
         group = iam.Group(self.iam_group)
-
         ########################################################
         try:
             group.remove_user(UserName=self.iam_user)
@@ -99,18 +106,28 @@ class Iam(AWSResourceBase):
         for action,arn in policy_arns.items():
             arn = self._create_qh_policy(action)
 
-    def attach_policies_and_group(self):
+    def attach_policies_and_group(self) -> bool:
+        rtn = False
         iam = self.iam
         group = iam.Group(self.iam_group)
         policy_arns = self.qh_policy_arns()
         for action,arn in policy_arns.items():
-            if arn is None:
-                logger.warning(f"Not attaching a policy for action '{action}': Does not exist.")
-                continue
-            group.attach_policy(PolicyArn=policy_arns[action])
-            logger.info(f"Policy '{policy_arns[action]}' is attached to group '{group.name}'")
-        group.add_user(UserName=self.iam_user)
-        logger.info(f"User '{self.iam_user}' is attached to group '{group.name}'")
+            _arn = Arn(arn)
+            if _arn.is_arn(arn):
+                group.attach_policy(PolicyArn=policy_arns[action])
+                logger.info(f"Policy '{policy_arns[action]}' is attached to group '{group.name}'")
+            else:
+                logger.warning(f"Not attaching a policy for action '{action}': {_arn.error}")
+                rtn = False
+        try:
+            group.add_user(UserName=self.iam_user)
+            rtn = True
+            logger.info(f"User '{self.iam_user}' is attached to group '{group.name}'")
+        except ClientError as e:
+            code = e.response['Error']['Code']
+            if code == 'UnauthorizedOperation' or code == 'AccessDenied':
+                return rtn
+        return rtn
 
     def create_user_group(self):
         iam = self.iam
@@ -119,7 +136,7 @@ class Iam(AWSResourceBase):
         group = iam.Group(self.iam_group)
         try:
             user = user.create(
-                Path='/',
+                Path='/quickhost/',
                 Tags=[ { 'Key': 'quickhost', 'Value': 'aws' }, ]
             )
             logger.info(f"Created user '{self.iam_user}'")
@@ -129,13 +146,16 @@ class Iam(AWSResourceBase):
                 logger.info(f"User '{self.iam_user}' already exists.")
 
         try: 
-            group.create(Path='/')
+            group.create(
+                Path='/quickhost/',
+                GroupName=self.iam_group
+                #Tags=[ { 'Key': 'quickhost', 'Value': 'aws' }, ]
+            )
             logger.info(f"Created group '{self.iam_group}'")
         except ClientError as e:
             code = e.__dict__['response']['Error']['Code']
             if code == 'EntityAlreadyExists':
                 logger.info(f"Group '{self.iam_group}' already exists.")
-
 
     def qh_policy_arns(self):
         rtn = {
@@ -147,7 +167,7 @@ class Iam(AWSResourceBase):
         qh_policies = scrub_datetime(self.client.list_policies(
             PathPrefix='/quickhost/',
         ))['Policies']
-        describe_policy_arn = None
+
         for policy in qh_policies:
             if policy['PolicyName'] == 'quickhost-create':
                 rtn['create'] = policy['Arn']
@@ -170,7 +190,7 @@ class Iam(AWSResourceBase):
             new_policy = self.client.create_policy(
                 PolicyName=f"quickhost-{action}",
                 Path='/quickhost/',
-                PolicyDocument=json.dumps(PolicyData[action]),
+                PolicyDocument=json.dumps(PolicyData(self.caller_info['Account'])[action]),
                 Description=f"Allow quickhost-users to {action} apps",
                 Tags=[ { 'Key': 'quickhost', 'Value': 'aws' }, ]
             )
@@ -179,7 +199,7 @@ class Iam(AWSResourceBase):
         except ClientError as e:
             code = e.__dict__['response']['Error']['Code']
             if code == 'EntityAlreadyExists':
-                logger.info(f"Policy '{action}' already exists.")
+                logger.warning(f"Policy '{action}' already exists.")
                 arn = existing_policies[action]
         return arn
 
@@ -328,6 +348,7 @@ class Iam(AWSResourceBase):
                 logger.debug(f"Group '{self.iam_group}' does not exist.")
             else:
                 logger.error(f"Unknown error caught: {e}")
+                return f"ERROR ({code})"
             return rtn # return before trying to get nogroup's policies.
         for attached_policy in group.attached_policies.all():
             rtn['attached-policies'].append(attached_policy.arn)
@@ -335,6 +356,7 @@ class Iam(AWSResourceBase):
 
     def _describe_iam_user(self):
         rtn = {
+            'name': '',
             'arn': '',
             'access-keys': [],
         }
@@ -385,32 +407,7 @@ class Iam(AWSResourceBase):
         finally:
             return rtn
 
-#class IamState:
-#    def __init__(self):
-#        self.credentials = Credentials()
-#        self.iam_user = IamUser()
-#        self.iam_group = IamGroup()
-#        self.iam_policies = IamPolicies()
-#    class Credentials:
-#        def __init__(self):
-#            self.default_region = None
-#            self.exist = None
-#    class IamUser:
-#        def __init__(self):
-#            self.arn = None
-#            self.access_keys = []
-#    class IamGroup:
-#        def __init__(self):
-#            self.arn: None
-#            self.attached_policies: []
-#    class IamPolicies:
-#        def __init__(self):
-#            self.create: None, 
-#            self.describe: None, 
-#            self.update: None, 
-#            self.destroy: None, 
-
-PolicyData = {
+PolicyData = lambda QUICKHOST_ACCOUNT: {
     'create':{
         "Version": "2012-10-17",
         "Statement": [
@@ -432,11 +429,28 @@ PolicyData = {
         "Version": "2012-10-17",
         "Statement": [
             {
-                "Sid": "quickhostDescribe",
+                "Sid": "quickhostDescribeUserActions",
                 "Effect": "Allow",
                 "Action": [
                     "iam:GetUser",
+                    "iam:GetGroup",
                     "iam:ListUsers",
+                    "iam:ListAccessKeys",
+                ],
+                "Resource": f"arn:aws:iam::{QUICKHOST_ACCOUNT}:user/quickhost/*"
+            },
+            {
+                "Sid": "quickhostDescribePolicies",
+                "Effect": "Allow",
+                "Action": [
+                    "iam:ListPolicies",
+                ],
+                "Resource": f"arn:aws:iam::{QUICKHOST_ACCOUNT}:policy/quickhost/*"
+            },
+            {
+                "Sid": "quickhostDescribe",
+                "Effect": "Allow",
+                "Action": [
                     "ec2:DescribeInstances",
                     "ec2:DescribeVpcs",
                     "ec2:DescribeSubnets",

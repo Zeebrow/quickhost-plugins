@@ -8,8 +8,8 @@ import botocore.exceptions
 
 from quickhost.temp_data_collector import store_test_data
 
-from .constants import *
-from .utilities import QH_Tag, Null
+from .constants import AWSConstants
+from .utilities import QH_Tag, UNDEFINED, get_single_result_id
 #from .temp_data_collector import store_test_data
 from .AWSResource import AWSResourceBase
 
@@ -18,14 +18,17 @@ logger = logging.getLogger(__name__)
 
 class SG(AWSResourceBase):
     #def __init__(self, client: any, ec2_resource: any, app_name: str, vpc_id: str, ports: List[int], cidrs: List[str], dry_run: bool):
-    def __init__(self, app_name: str, vpc_id: str):
-        self.client = self.get_client('ec2')
-        self.ec2 = self.get_resource('ec2')
+    def __init__(self, app_name: str, vpc_id: str, profile=AWSConstants.DEFAULT_IAM_USER, region=AWSConstants.DEFAULT_REGION):
+        self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
+        self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
+        if self._client_caller_info == self._resource_caller_info:
+            self.caller_info = self._client_caller_info
         self.app_name = app_name
         self.vpc_id = vpc_id
 
     def get_security_group_id(self) -> str:
         dsg = None
+        rtn = UNDEFINED
         try:
             dsg = self.client.describe_security_groups(
                 Filters=[
@@ -33,10 +36,18 @@ class SG(AWSResourceBase):
                     { 'Name': 'group-name', 'Values': [ self.app_name, ] },
                 ],
             )
-            return dsg['SecurityGroups'][0]['GroupId']
+            return get_single_result_id(resource=dsg, resource_type='SecurityGroup', plural=True)
         except botocore.exceptions.ClientError as e:
+            print(e)
+            print(e['Error'])
+            print(e['Code'])
+#            code = e.__dict__['response']['Error']['Code']
+#            if code == 'NoSuchEntity':
+#                logger.info(f"User '{self.iam_user}' doesn't exist")
+#            else:
+#                logger.error(f"Unknown error caught while deleting user: {e}")
             logger.debug(f"Could not get sg for app '{self.app_name}':\n{e}")
-            return None
+            return 
         if len(dsg['SecurityGroups']) > 1:
             raise RuntimeError(f"More than 1 security group was found with the name '{self.app_name}': {sg['GroupId'] for sg in dsg['SecurityGroups']}")
         elif len(dsg['SecurityGroups']) < 1:
@@ -76,9 +87,6 @@ class SG(AWSResourceBase):
             if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
                 logger.info(f"No security group found for app '{self.app_name}', skipping...")
                 return
-            elif e.response['Error']['Code'] == 'UnauthorizedOperation':
-                logger.error(f"({e.response['Error']['Code']}): {e.operation_name}")
-                return
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
                 return
@@ -104,16 +112,13 @@ class SG(AWSResourceBase):
             if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
                 logger.info(f"No security group found for app '{self.app_name}', skipping...")
                 return
-            elif e.response['Error']['Code'] == 'UnauthorizedOperation':
-                logger.error(f"Unauthorized to get security group info: {e.response['Error']['Code']}: {e.response['Error']['Message']}")
-                return
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
                 return
 
     def describe(self):
         rtn = {
-            'sgid': Null, #giving this a try
+            'sgid': UNDEFINED, #giving this a try
             'ports': [],
             'cidrs': [],
         }
@@ -147,8 +152,6 @@ class SG(AWSResourceBase):
                 self.sgid = None
                 logger.error(f"No security group found for app '{self.app_name}' (does the app exist?)")
                 rtn['sgid'] = None
-            if e.response['Error']['Code'] == 'UnauthorizedOperation':
-                logger.error(f"Unauthorized to get security group info: {e.response['Error']['Code']}: {e.response['Error']['Message']}")
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
         finally:

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 from dataclasses import dataclass
 from argparse import Namespace, SUPPRESS, ArgumentParser, _ArgumentGroup
 from abc import ABCMeta, abstractmethod
@@ -6,6 +6,7 @@ import configparser
 import logging
 import os
 import json
+from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError
@@ -13,14 +14,14 @@ from botocore.exceptions import ClientError
 import quickhost
 from quickhost import APP_CONST as QHC, QHExit
 
+from .AWSResource import AWSResourceBase
 from .AWSIam import Iam
 from .AWSSG import SG
 from .AWSHost import AWSHost
 from .AWSKeypair import KP
 from .AWSNetworking import AWSNetworking
 from .constants import AWSConstants
-from .utilities import check_running_as_user, get_ssh
-from .AWSResource import AWSResourceBase
+from .utilities import check_running_as_user, get_ssh, QuickhostUnauthorized
 
 logger = logging.getLogger(__name__)
 
@@ -62,52 +63,15 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         self.sgid = None
         #self.load_default_config()
 
-    def plugin_init(self, init_args: dict):
-        """
-        Setup the following:
-        - IAM user/group/policies/credentials
-        - .aws/config and .aws/credentials files
-        - VPC/Subnet/Routing/networking per-region
-        """
-        params = self._parse_init(init_args)
-        iam_client = self.get_client(resource='iam', profile=params['profile'])
-        sts_client = self.get_client(resource='sts', profile=params['profile'])
-        ec2_client = self.get_client(resource='ec2', profile=params['profile'])
-
-        caller_id = sts_client.get_caller_identity()
-        username = quickhost.scrub_datetime(iam_client.get_user())['User']['UserName']
-        user_id = quickhost.scrub_datetime(iam_client.get_user())['User']['UserId']
-        acct = caller_id['Account']
-        
-        caller_id.pop('ResponseMetadata')
-        inp = input(f"About to initialize quickhost using:\nuser:\t\t{username} ({user_id})\naccount:\t{acct}\n\nContinue? (y/n)")
-        if not inp.lower() == ('y' or 'yes'):
-            print('Aborted')
-            exit(3)
-        qh_iam = Iam(profile=params['profile'])
-        #print(json.dumps(qh_iam.describe(), indent=2))
-        qh_iam.create()
-        #qh_iam.destroy()
-        #qh_iam.describe()
-        #print(json.dumps(qh_iam.describe(), indent=2))
-        networking_params= AWSNetworking(
-            app_name=self.app_name,
-            profile=params['profile']
-        )
-        #print(json.dumps(networking_params.describe(), indent=2))
-        p = networking_params.create()
-        #p = networking_params.destroy()
-        #p = networking_params.get()
-        #print(p)
-        #print(json.dumps(networking_params.describe(), indent=2))
-        return 
-
-    def load_default_config(self):
+    def load_default_config(self, cache_ok=True, region=AWSConstants.DEFAULT_REGION, profile=AWSConstants.DEFAULT_IAM_USER):
         networking_params = AWSNetworking(
             app_name=self.app_name,
-        ).get()
+            region=region,
+            profile=profile
+        ).describe(use_cache=cache_ok)
         self.vpc_id = networking_params['vpc_id']
         self.subnet_id = networking_params['subnet_id']
+        return networking_params
 
     def _old_load_default_config(self):
         """
@@ -137,12 +101,16 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     def get_init_parser(self):
         init_parser = ArgumentParser("AWS init", add_help=False)
-        #parser.add_argument("-y", "--dry-run", required=False, action='store_true', help="prevents any resource creation when set")
-        #parser.add_argument("-a", "--aws-access-key-id", required=False, action='store_true', help="the access key id provided when creating root account credentials")
-        #init_parser.add_argument("-x", "--aws-secret-access-key", required=False, action='store', help="the secret access key provided when creating root account credentials")
-        init_parser.add_argument("--profile", required=False, action='store', help="profile of an admin AWS account used to create initial quickhost resources")
-        init_parser.add_argument("--region", required=False, action='store', help="AWS region in which to create initial quickhost resources")
-        #parser.add_argument("-f", "--user-key-csv", required=False, action='store_true', help="path to the rootkey.csv file downloaded when creating root account credentials")
+        #parser.add_argument("-y", "--answer-yes", required=False, action='store_true', help="bypass prompt to confirm you want to init.")
+        init_parser.add_argument("--profile", required=False, action='store', default=AWSConstants.DEFAULT_IAM_USER, help="profile of an admin AWS account used to create initial quickhost resources")
+        init_parser.add_argument(
+            "--region",
+            required=False,
+            action='store',
+            choices=AWSConstants.AVAILABLE_REGIONS,
+            default=AWSConstants.DEFAULT_REGION,
+            help="AWS region in which to create initial quickhost resources"
+        )
         return init_parser
 
     def get_make_parser(self):
@@ -156,8 +124,9 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         make_parser.add_argument("-p", "--port", required=False, type=int, action='append', default=SUPPRESS, help="add an open tcp port to security group, applied to all ips")
         make_parser.add_argument("--ip", required=False, action='append', help="additional ipv4 to allow through security group. all ports specified with '--port' are applied to all ips specified with --ip if a cidr is not included, it is assumed to be /32")
         make_parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
-        make_parser.add_argument("--ami", required=False, default=SUPPRESS, help="change the ami to launch, see source-aliases for getting lastest")
-        make_parser.add_argument("-u", "--userdata", required=False, default=SUPPRESS, help="path to optional userdata file")
+        make_parser.add_argument("--ami", required=False, default=None, help="change the ami to launch, see source-aliases for getting lastest")
+        make_parser.add_argument("-u", "--userdata", required=False, default=None, help="path to optional userdata file")
+        make_parser.add_argument("--region", required=False, choices=AWSConstants.AVAILABLE_REGIONS, default=AWSConstants.DEFAULT_REGION, help="region to launch the host into.")
         return make_parser
 
     def get_describe_parser(self):
@@ -169,12 +138,13 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         parser.add_argument("-p", "--port", required=False, type=int, action='append', default=SUPPRESS, help="add an open tcp port to security group, applied to all ips")
         parser.add_argument("--ip", required=False, action='append', help="additional ipv4 to allow through security group. all ports specified with '--port' are applied to all ips specified with --ip if a cidr is not included, it is assumed to be /32")
         parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
-        parser.add_argument("--ami", required=False, default=SUPPRESS, help="change the ami to launch, see source-aliases for getting lastest")
+        parser.add_argument("--ami", required=False, default=None, help="change the ami to launch, see source-aliases for getting lastest")
         parser.add_argument("-u", "--userdata", required=False, default=SUPPRESS, help="path to optional userdata file")
         return None
 
     def get_destroy_parser(self):
         parser= ArgumentParser("AWS destroy", add_help=False)
+        parser.add_argument("-r", "--region", required=False, default=AWSConstants.DEFAULT_REGION, help="region to launch the host into.")
         return parser
 
     @classmethod
@@ -182,15 +152,26 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         """required cli arguments, as well as allowed overrides"""
         pass
     
-    def run_init(self, args: dict):
+    def run_init(self, args: dict) -> Tuple[QHExit, str, str]:
         """must be run as an admin-like user"""
         logger.debug('run init')
-        self.plugin_init(args)
-        return QHExit.OK
+        rc = QHExit.GENERAL_FAILURE
+        stdout = None
+        stderr = None
+
+        try:
+            rc = self.plugin_init(args)
+            stdout = 'Done.'
+        except QuickhostUnauthorized as e:
+            stderr = "Unauthorized: {}".format(e)
+            stderr += "\nTry specifiying a different user with --profile."
+            rc = QHExit.FAIL_AUTH
+        return (rc, stdout, stderr)
 
     def run_make(self, args: dict):
         logger.debug('make')
-        prompt_continue = input("proceed?")
+        print(f"{args=}")
+        prompt_continue = input("proceed? (y/n)")
         if not prompt_continue == 'y':
             print("aborted.")
             return QHExit.ABORTED
@@ -205,7 +186,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     def run_destroy(self, args: dict):
         logger.debug('destroy')
-        prompt_continue = input("proceed?")
+        prompt_continue = input("proceed? (y/n)")
         if not prompt_continue == 'y':
             print("aborted.")
             return QHExit.ABORTED
@@ -259,6 +240,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         return init_params
     
     def _parse_make(self, args: dict):
+        print(f"{args=}")
         make_params = {}
         flags = args.keys()
         # ports ingress
@@ -272,68 +254,54 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
                     ports.append(str(p))
                 except ValueError:
                     raise RuntimeError("port numbers must be digits")
-            self.ports = ports
-            # @@@ todo: return make_params_params instead of using AWSApp() properties..?
             make_params['ports'] = ports
         else:
-            self.ports = QHC.DEFAULT_OPEN_PORTS
             make_params['ports'] = QHC.DEFAULT_OPEN_PORTS
         # cidrs ingress
         make_params['cidrs'] = []
         if args['ip'] is None:
-            self.cidrs = [quickhost.get_my_public_ip()]
             make_params['cidrs'].append(quickhost.get_my_public_ip())
         else:
             for i in args['ip']:
                 if len(i.split('/')) == 1:
                     logger.warning(f"Assuming /32 cidr for ip '{i}'")
-                    self.cidrs.append(i + "/32")
                     make_params['cidrs'].append(i + "/32")
                 else:
-                    self.cidrs.append(i)
                     make_params['cidrs'].append(i)
         # userdata
-        if 'user_data' in flags:
+        if args['userdata'] is not None:
             if not Path(args['userdata']).exists():
                 raise RuntimeError(f"path to userdata '{args['userdata']}' does not exist!")
-            self.userdata = flags['userdata']
+        make_params['userdata'] = args['userdata']
+
 
         # ec2 key name
         if 'key_name' in flags:
-            self.key_name = args['key_name']
             make_params['key_name'] = args['key_name']
         else:
-            self.key_name = self.app_name
             make_params['key_name'] = self.app_name
 
         # ec2 key pem file
         if 'ssh_key_filepath' in flags:
-            self.ssh_key_filepath = args['ssh_key_filepath']
             make_params['ssh_key_filepath'] = args['ssh_key_filepath']
         else:
-            self.ssh_key_filepath = f"{self.app_name}.pem"
             make_params['ssh_key_filepath'] = f"{self.app_name}.pem"
 
         # the rest 
         if 'dry_run' in flags:
-            #self.dry_run = not args['dry_run']
-            self.dry_run = args['dry_run']
             make_params['dry_run'] = args['dry_run']
         if 'host_count' in flags:
-            self.num_hosts = args['host_count']
             make_params['host_count'] = args['host_count']
         if 'instance_type' in flags:
-            self.instance_type = args['instance_type']
             make_params['instance_type'] = args['instance_type']
         if 'ami' in flags:
-            self.ami= args['ami']
             make_params['ami'] = args['ami']
         if 'vpc_id' in flags:
-            self.vpc_id= args['vpc_id']
             make_params['vpc_id'] = args['vpc_id']
         if 'subnet_id' in flags:
-            self.subnet_id= args['subnet_id']
             make_params['subnet_id'] = args['subnet_id']
+        if 'region' in flags:
+            make_params['region'] = args['region']
 
         return make_params
 
@@ -377,36 +345,59 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             logger.warning("There's nowhere to show your results!")
         return None
 
+    def plugin_init(self, init_args: dict):
+        """
+        Setup the following:
+        - IAM user/group/policies/credentials
+        - .aws/config and .aws/credentials files
+        - VPC/Subnet/Routing/networking per-region
+        """
+        params = self._parse_init(init_args)
+        whoami, iam_client = self.get_client(resource='iam', **params)
+
+        user_arn = whoami['Arn']
+        user_name = user_arn.split(":")[5].split("/")[-1]
+        user_id = whoami['UserId']
+        account = whoami['Account']
+        
+        inp = input(f"About to initialize quickhost using:\nuser:\t\t{user_name} ({user_id})\naccount:\t{account}\n\nContinue? (y/n)")
+        if not inp.lower() == ('y' or 'yes'):
+            print('Aborted')
+            exit(3)
+        qh_iam = Iam(**params)
+        #print(json.dumps(qh_iam.describe(), indent=2))
+        #qh_iam.destroy()
+        qh_iam.create()
+        #qh_iam.describe()
+        #print(json.dumps(qh_iam.describe(), indent=2))
+        networking_params= AWSNetworking(
+            app_name=self.app_name,
+            **params
+        )
+        #print(json.dumps(networking_params.describe(), indent=2))
+        p = networking_params.create()
+        #p = networking_params.destroy()
+        #p = networking_params.get()
+        #print(p)
+        #print(json.dumps(networking_params.describe(), indent=2))
+        return 
+
     def describe(self, args: dict) -> None:
         self._parse_describe()
-        self.load_default_config()
+        networking_params = self.load_default_config()
 
         sts = self.get_client( 'sts',)
         caller_id = sts.get_caller_identity()
-        iam = self.get_client('iam')
-        all_users = iam.list_users()
-        running_as_user_id = caller_id['UserId']
-        running_as_user = ''
-        for u in all_users['Users']:
-            if u['UserId'] == running_as_user_id:
-                running_as_user = u['UserName']
-                break
-        iam_vals = {
-            "invoking_user_name": running_as_user,
-            "invoking_user_id": running_as_user_id,
-        }
-        sg = SG(
+        iam_vals = Iam().describe(verbiage=1)
+        sg_vals = SG(
             app_name=self.app_name,
             vpc_id=self.vpc_id,
-        )
-        sg_vals = sg.describe()
-        kp = KP( app_name=self.app_name,)
-        kp_vals = kp.describe()
-        host = AWSHost( app_name=self.app_name,)
-        host_vals = host.describe()
-        init = AWSNetworking( app_name=self.app_name,)
+        ).describe()
+        kp_vals = KP( app_name=self.app_name,).describe()
+        host_vals = AWSHost( app_name=self.app_name,).describe()
         # idk man
-        self._print_loaded_args(init.describe(),heading=f"global params")
+        self._print_loaded_args(networking_params,heading=f"global params")
+        self._print_loaded_args(caller_id)
         self._print_loaded_args(iam_vals)
         self._print_loaded_args(sg_vals)
         self._print_loaded_args(kp_vals)
@@ -416,36 +407,53 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         #self._print_loaded_args(heading=f"Params for app '{self.app_name}'")
 
     def create(self, args: dict):
-        self.load_default_config()
-        p = self._parse_make(args)
+        params = self._parse_make(args)
+        self.load_default_config(region=params['region'])
+        profile = AWSConstants.DEFAULT_IAM_USER
         kp = KP(
             app_name=self.app_name,
+            region=params['region'],
+            profile=profile
         )
-        kp.create()
         sg = SG(
             app_name=self.app_name,
+            region=params['region'],
+            profile=profile,
             vpc_id=self.vpc_id,
         )
+        host = AWSHost(
+            app_name=self.app_name,
+            region=params['region'],
+            profile=profile
+        )
+        kp.create()
         sgid = sg.create(
             ports=self.ports,
             cidrs=self.cidrs
         )
-        host = AWSHost(
-            app_name=self.app_name,
-        )
-        if self.ami is None:
+        if params['ami'] is None:
             print("No ami specified, getting latest al2...", end='')
-            self.ami = AWSHost.get_latest_image(self._client)
-            print(f"done ({self.ami})")
+            ami = host.get_latest_image()
+            print(f"done ({ami})")
+#        host.create(
+#            num_hosts=self.num_hosts,
+#            image_id=ami,
+#            instance_type=self.instance_type,
+#            subnet_id=self.subnet_id,
+#            sgid=sgid,
+#            key_name=self.key_name,
+#            userdata=self.userdata,
+#            dry_run=self.dry_run
+#        )
         host.create(
-            num_hosts=self.num_hosts,
-            image_id=self.ami,
-            instance_type=self.instance_type,
             subnet_id=self.subnet_id,
+            num_hosts=params['host_count'],
+            image_id=ami,
+            instance_type=params['instance_type'],
             sgid=sgid,
-            key_name=self.key_name,
-            userdata=self.userdata,
-            dry_run=self.dry_run
+            key_name=params['key_name'],
+            userdata=params['userdata'],
+            dry_run=params['dry_run']
         )
         #_host.get_ssh()
         print('Done')

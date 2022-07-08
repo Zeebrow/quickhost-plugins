@@ -14,6 +14,7 @@ from quickhost.temp_data_collector import store_test_data
 from .AWSSG import SG
 from .constants import AWSConstants as AWS
 from .AWSResource import AWSResourceBase
+from .constants import AWSConstants
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +43,22 @@ class HostState:
 
 
 class AWSHost(AWSResourceBase):
-    def __init__(self, app_name):
-        self.client = self.get_client('ec2')
-        self.ec2 = self.get_resource('ec2')
+    def __init__(
+            self,
+            app_name,
+#            vpc_id,
+#            subnet_id,
+            profile=AWSConstants.DEFAULT_IAM_USER,
+            region=AWSConstants.DEFAULT_REGION
+        ): #sigh
+        self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
+        self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
+        if self._client_caller_info == self._resource_caller_info:
+            self.caller_info = self._client_caller_info
         self.app_name=app_name
         self.host_count = None
-
+#        self.vpc_id = vpc_id,
+#        self.subnet_id = subnet_id,
 
     def create(self, num_hosts, instance_type, sgid, subnet_id, userdata, key_name, dry_run=False, image_id=AWS.DEFAULT_HOST_OS):
         self.host_count = num_hosts
@@ -108,20 +119,8 @@ class AWSHost(AWSResourceBase):
                     if host['State']['Name'] in ['running', 'pending']:
                         instances.append(self._descibe_instance(host=host))
         except ClientError as e:
-            if e.response['Error']['Code'] == 'UnauthorizedOperation':
-                logger.error(f"Unauthorized to get security group info.")
-                return [self._descibe_instance({
-                    'State': {
-                        'Name': ['?'],
-                    }
-                }, none_val='?')]
-            else:
-                logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
-                return [self._descibe_instance({
-                    'State': {
-                        'Name': [None],
-                    }
-                })]
+            logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
+            raise e
         return instances
 
     def destroy(self):
@@ -136,12 +135,8 @@ class AWSHost(AWSResourceBase):
             )
             self.wait_for_hosts_to_terminate(tgt_instances=tgt_instances)
         except ClientError as e:
-            if e.response['Error']['Code'] == 'UnauthorizedOperation':
-                logger.error(f"Unauthorized to get security group info.")
-                return False
-            else:
-                logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
-                return False
+            logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
+            raise e
         # {'TerminatingInstances': [{'CurrentState': {'Code': 32, 'Name': 'shutting-down'}, 'InstanceId': 'i-090ab1a37ba8583bd', 'PreviousState': {'Code': 16, 'Name': 'running'}}], 'ResponseMetadata': {'RequestId': 'bf923b37-a043-4150-8654-d4fcbca4b0bc', 'HTTPStatusCode': 200, 'HTTPHeaders': {'x-amzn-requestid': 'bf923b37-a043-4150-8654-d4fcbca4b0bc', 'cache-control': 'no-cache, no-store', 'strict-transport-security': 'max-age=31536000; includeSubDomains', 'vary': 'accept-encoding', 'content-type': 'text/xml;charset=UTF-8', 'transfer-encoding': 'chunked', 'date': 'Sun, 03 Jul 2022 00:31:55 GMT', 'server': 'AmazonEC2'}, 'RetryAttempts': 0}}
         print(f"{response=}")
 
@@ -173,13 +168,12 @@ class AWSHost(AWSResourceBase):
             return None
         return instance_ids
 
-    @classmethod
-    def get_latest_image(self, client, os=QHC.DEFAULT_APP_NAME):
+    def get_latest_image(self, os=QHC.DEFAULT_APP_NAME):
         """
         Get the latest amazon linux 2 ami
         TODO: see source-aliases and make an Ubuntu option
         """
-        response = client.describe_images(
+        response = self.client.describe_images(
             Filters=[
                 {
                     'Name': 'name',
@@ -202,7 +196,7 @@ class AWSHost(AWSResourceBase):
         If a property cannot be retrieved, it will be replaced with `none_val`.
         """
         none_val = None
-        _try_get_attr = lambda d,attr: noneval if not attr in d.keys() else d[attr]
+        _try_get_attr = lambda d,attr: none_val if not attr in d.keys() else d[attr]
         return {
             'app_name': self.app_name,
             'ami': _try_get_attr(host,'ImageId'),

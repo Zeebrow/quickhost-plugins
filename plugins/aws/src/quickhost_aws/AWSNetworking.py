@@ -8,7 +8,7 @@ from botocore.exceptions import ClientError
 import quickhost as qh
 from quickhost import APP_CONST as C
 
-from .utilities import get_single_result_id, check_running_as_user
+from .utilities import get_single_result_id, check_running_as_user, quickmemo, QuickhostUnauthorized
 from .constants import AWSConstants
 from .AWSResource import AWSResourceBase
 
@@ -20,10 +20,12 @@ class AWSNetworking(AWSResourceBase):
     DefaultTag = { 'Value': f"{C.DEFAULT_APP_NAME}", 'Key': 'Name' }
     TagSpec = lambda resource: { 'ResourceType': resource, 'Tags': [ AWSNetworking.DefaultTag ] }
 
-    def __init__(self, app_name: str, profile=None, dry_run=False):
+    def __init__(self, app_name: str, profile=None, region=None, dry_run=False):
         self.app_name = app_name
-        self.client = self.get_client('ec2', profile=profile)
-        self.ec2 = self.get_resource('ec2', profile=profile)
+        self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
+        self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
+        if self._client_caller_info == self._resource_caller_info:
+            self.caller_info = self._client_caller_info
         self.dry_run = dry_run
         self.vpc_id = None
         self.igw_id = None
@@ -31,14 +33,15 @@ class AWSNetworking(AWSResourceBase):
         self.rt_id = None
 
     def create(self, cidr_block=C.DEFAULT_VPC_CIDR):
-        self.__dict__.update(self.get())
-        ec2 = self.ec2
-
+        self.__dict__.update(self.describe())
+        ####################################################
+        # vpc
+        ####################################################
         vpc = None 
         if not self.vpc_id:
             logger.debug("creating vpc...")
 
-            vpc = ec2.create_vpc(
+            vpc = self.ec2.create_vpc(
                 CidrBlock=cidr_block,
                 DryRun=self.dry_run,
                 TagSpecifications=[ AWSNetworking.TagSpec('vpc'), ]
@@ -50,8 +53,11 @@ class AWSNetworking(AWSResourceBase):
             logger.debug(f"Done. {self.vpc_id=}")
         else:
             logger.debug(f"Found existing vpc: {self.vpc_id}")
-            vpc = ec2.Vpc(self.vpc_id)
+            vpc = self.ec2.Vpc(self.vpc_id)
 
+        ####################################################
+        # igw
+        ####################################################
         igw = None
         igw_ok = 'Not OK'
         if not self.igw_id:
@@ -61,14 +67,14 @@ class AWSNetworking(AWSResourceBase):
                 TagSpecifications=[ AWSNetworking.TagSpec('internet-gateway'), ]
             )
             self.igw_id = get_single_result_id("InternetGateway", igw_id, plural=False)
-            igw = ec2.InternetGateway(self.igw_id)
+            igw = self.ec2.InternetGateway(self.igw_id)
             logger.debug(f"...attaching igw ({self.igw_id}) to vpc ({self.vpc_id})...")
             igw.attach_to_vpc(DryRun=False, VpcId=self.vpc_id)
             igw.reload()
             logger.debug(f"Done. {self.igw_id=}")
         else:
             igw_ok = 'Check attachment'
-            igw = ec2.InternetGateway(self.igw_id)
+            igw = self.ec2.InternetGateway(self.igw_id)
             # Do we want to 'fix' the attachment?
             if len(igw.attachments) == 0:
                 igw.attach_to_vpc(DryRun=False, VpcId=self.vpc_id)
@@ -77,6 +83,9 @@ class AWSNetworking(AWSResourceBase):
                 igw_ok = f"Attached to vpc {self.vpc_id}"
             logger.debug(f"Found existing internet gateway with id: {self.igw_id} ({igw_ok})")
 
+        ####################################################
+        # subnet
+        ####################################################
         subnet = None
         if not self.subnet_id:
             logger.debug("creating subnet...")
@@ -92,8 +101,11 @@ class AWSNetworking(AWSResourceBase):
             logger.debug(f"Done. {self.subnet_id=}")
         else:
             logger.debug(f"Found existing subnet: {self.subnet_id}")
-            subnet = ec2.Subnet(self.subnet_id)
+            subnet = self.ec2.Subnet(self.subnet_id)
 
+        ####################################################
+        # route-table
+        ####################################################
         rt_ok = 'Not OK'
         route_table = None
         if not self.rt_id:
@@ -124,7 +136,7 @@ class AWSNetworking(AWSResourceBase):
             logger.debug(f"Done. {self.rt_id=} ({rt_ok})")
         else:
             rt_ok = 'Check association'
-            route_table = ec2.RouteTable(self.rt_id)
+            route_table = self.ec2.RouteTable(self.rt_id)
             if len(route_table.associations_attribute) == 0:
                 route_table_association = route_table.associate_with_subnet(
                     DryRun=False,
@@ -132,27 +144,32 @@ class AWSNetworking(AWSResourceBase):
                 )
                 route_table.reload()
                 rt_ok = 'ok'
-
-
             if route_table.associations_attribute[0]['SubnetId']  == self.subnet_id and route_table.associations_attribute[0]['AssociationState']['State'] == "associated":
                 rt_ok = f"Associated with subnet {self.subnet_id}"
             logger.debug(f"Found existing route table: {self.rt_id} ({rt_ok})")
-        rt = ec2.RouteTable(self.rt_id)
+        rt = self.ec2.RouteTable(self.rt_id)
 
-    def get(self):
-        ec2 = self.ec2
+    @quickmemo
+    def describe(self, use_cache=True):
+        try: 
+            # permissions exceptions are normally caught in AWSApp.py
+            # these are special because they are called for all actions
+            existing_vpcs = self.client.describe_vpcs( Filters=[ AWSNetworking.DefaultFilter ],)
+            vpc_id = get_single_result_id("Vpc", existing_vpcs)
 
-        existing_vpcs = self.client.describe_vpcs( Filters=[ AWSNetworking.DefaultFilter ],)
-        vpc_id = get_single_result_id("Vpc", existing_vpcs)
-
-        existing_subnets = self.client.describe_subnets( Filters=[ AWSNetworking.DefaultFilter ],)
-        subnet_id = get_single_result_id("Subnet",existing_subnets)
+            existing_subnets = self.client.describe_subnets( Filters=[ AWSNetworking.DefaultFilter ],)
+            subnet_id = get_single_result_id("Subnet",existing_subnets)
+        except ClientError as e:
+            code = e.response['Error']['Code']
+            if code == 'UnauthorizedOperation' or code == 'AccessDenied':
+                logger.critical(f"The user {self.caller_info['username']} couldn't perform the operation '{e.operation_name}'.")
+                raise QuickhostUnauthorized(username=self.caller_info['username'], operation=e.operation_name) 
 
         existing_igws = self.client.describe_internet_gateways( Filters=[ AWSNetworking.DefaultFilter ],)
         igw_id = get_single_result_id("InternetGateway",existing_igws)
 
         if igw_id is not None:
-            igw = ec2.InternetGateway(igw_id)
+            igw = self.ec2.InternetGateway(igw_id)
             if igw.attachments == []:
                 logger.warn(f"Internet Gateway '{igw_id}' is not attached to a vpc!")
             else:
@@ -169,20 +186,17 @@ class AWSNetworking(AWSResourceBase):
             "rt_id": rt_id,
             "igw_id": igw_id,
         }
-    def describe(self):
-        return self.get()
-
+        
     def destroy(self):
-        ec2 = self.ec2
-        self.__dict__.update(self.get())
-        vpc = ec2.Vpc(self.vpc_id)
-        subnet = ec2.Subnet(self.subnet_id)
-        igw = ec2.InternetGateway(self.igw_id)
-        rt = ec2.RouteTable(self.rt_id)
+        self.__dict__.update(self.describe())
+        vpc = self.ec2.Vpc(self.vpc_id)
+        subnet = self.ec2.Subnet(self.subnet_id)
+        igw = self.ec2.InternetGateway(self.igw_id)
+        rt = self.ec2.RouteTable(self.rt_id)
         rt_assoc_ids = [rtid['RouteTableAssociationId'] for rtid in rt.associations_attribute]
         logger.debug(f"deleting {len(rt_assoc_ids)} associations on route table '{self.rt_id}'...")
         for rtai in rt_assoc_ids:
-            ec2.RouteTableAssociation(rtai).delete(DryRun=False)
+            self.ec2.RouteTableAssociation(rtai).delete(DryRun=False)
         logger.debug(f"deleting route table '{self.rt_id}'...")
         rt.delete(DryRun=False)
 
