@@ -6,7 +6,7 @@ import json
 import boto3
 import botocore.exceptions
 
-from quickhost.temp_data_collector import store_test_data
+from quickhost import store_test_data, scrub_datetime
 
 from .constants import AWSConstants
 from .utilities import QH_Tag, UNDEFINED, get_single_result_id
@@ -117,6 +117,7 @@ class SG(AWSResourceBase):
                 return
 
     def describe(self):
+        logger.debug("AWSSG.describe")
         rtn = {
             'sgid': UNDEFINED, #giving this a try
             'ports': [],
@@ -147,6 +148,7 @@ class SG(AWSResourceBase):
             rtn['sgid']     = response['SecurityGroups'][0]['GroupId'] 
             rtn['ports']    = ports
             rtn['cidrs']    = cidrs
+            store_test_data(resource='AWSSG', action='describe_security_groups', response_data=scrub_datetime(response))
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
                 self.sgid = None

@@ -6,9 +6,9 @@ import boto3
 from botocore.exceptions import ClientError
 
 import quickhost as qh
-from quickhost import APP_CONST as C
+from quickhost import APP_CONST as C, store_test_data, scrub_datetime
 
-from .utilities import get_single_result_id, check_running_as_user, quickmemo, QuickhostUnauthorized
+from .utilities import get_single_result_id, check_running_as_user, QuickhostUnauthorized, quickmemo
 from .constants import AWSConstants
 from .AWSResource import AWSResourceBase
 
@@ -151,6 +151,7 @@ class AWSNetworking(AWSResourceBase):
 
     @quickmemo
     def describe(self, use_cache=True):
+        logger.debug("AWSNetworking.describe")
         try: 
             # permissions exceptions are normally caught in AWSApp.py
             # these are special because they are called for all actions
@@ -159,6 +160,8 @@ class AWSNetworking(AWSResourceBase):
 
             existing_subnets = self.client.describe_subnets( Filters=[ AWSNetworking.DefaultFilter ],)
             subnet_id = get_single_result_id("Subnet",existing_subnets)
+            store_test_data(resource='AWSNetworking', action='describe_vpcs', response_data=scrub_datetime(existing_vpcs))
+            store_test_data(resource='AWSNetworking', action='describe_subnets', response_data=scrub_datetime(existing_subnets))
         except ClientError as e:
             code = e.response['Error']['Code']
             if code == 'UnauthorizedOperation' or code == 'AccessDenied':
@@ -179,7 +182,8 @@ class AWSNetworking(AWSResourceBase):
 
         existing_rts = self.client.describe_route_tables( Filters=[ AWSNetworking.DefaultFilter ],)
         rt_id = get_single_result_id("RouteTable",existing_rts)
-
+        store_test_data(resource='AWSNetworking', action='describe_route_tables', response_data=scrub_datetime(existing_rts))
+        store_test_data(resource='AWSNetworking', action='describe_internet_gateways', response_data=scrub_datetime(existing_igws))
         return {
             "vpc_id": vpc_id,
             "subnet_id": subnet_id,

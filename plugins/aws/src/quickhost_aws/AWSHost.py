@@ -103,6 +103,7 @@ class AWSHost(AWSResourceBase):
         return True
 
     def describe(self):
+        logger.debug("AWSHost.describe")
         instances = []
         try: 
             app_hosts = self.client.describe_instances(
@@ -113,7 +114,7 @@ class AWSHost(AWSResourceBase):
                 DryRun=False,
                 MaxResults=10,
             )
-            store_test_data(resource='AWSHost', action='describe', response_data=quickhost.scrub_datetime(app_hosts))
+            store_test_data(resource='AWSHost', action='describe_instances', response_data=quickhost.scrub_datetime(app_hosts))
             for r in app_hosts['Reservations']:
                 for host in r['Instances']:
                     if host['State']['Name'] in ['running', 'pending']:
@@ -196,10 +197,11 @@ class AWSHost(AWSResourceBase):
         If a property cannot be retrieved, it will be replaced with `none_val`.
         """
         none_val = None
-        _try_get_attr = lambda d,attr: none_val if not attr in d.keys() else d[attr]
+        _try_get_attr = lambda d,attr: d[attr] if attr in d.keys() else none_val
         return {
             'app_name': self.app_name,
             'ami': _try_get_attr(host,'ImageId'),
+            'security_group': _try_get_attr(host,'SecurityGroups')[0]['GroupId'],
             'instance_id': _try_get_attr(host,'InstanceId'),
             'instance_type': _try_get_attr(host,'InstanceType'),
             'public_ip': _try_get_attr(host,'PublicIpAddress'),

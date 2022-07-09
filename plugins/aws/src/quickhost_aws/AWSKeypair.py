@@ -9,7 +9,7 @@ from botocore.exceptions import ClientError
 
 import quickhost
 from quickhost import APP_CONST as C
-from quickhost.temp_data_collector import store_test_data
+from quickhost import store_test_data, scrub_datetime
 
 from .utilities import get_single_result_id, handle_client_error, UNDEFINED
 from .AWSResource import AWSResourceBase
@@ -103,6 +103,7 @@ class KP(AWSResourceBase):
             )
             rtn['key_id']           = existing_key['KeyPairs'][0]['KeyPairId']
             rtn['key_fingerprint']  = existing_key['KeyPairs'][0]['KeyFingerprint']
+            store_test_data(resource='AWSKeypair', action='describe_key_pairs', response_data=scrub_datetime(response))
             return rtn
         except ClientError as e:
             code = e.__dict__['response']['Error']['Code']

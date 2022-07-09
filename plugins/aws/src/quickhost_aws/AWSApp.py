@@ -383,7 +383,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             exit(3)
         qh_iam = Iam(**params)
         #print(json.dumps(qh_iam.describe(), indent=2))
-        qh_iam.destroy()
+        #qh_iam.destroy()
         qh_iam.create()
         #qh_iam.describe()
         #print(json.dumps(qh_iam.describe(), indent=2))

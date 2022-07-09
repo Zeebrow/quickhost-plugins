@@ -6,7 +6,7 @@ from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
 
-from quickhost import scrub_datetime
+from quickhost import scrub_datetime, store_test_data, scrub_datetime
 
 from .utilities import get_single_result_id, check_running_as_user, QuickhostUnauthorized, Arn
 from .constants import AWSConstants
@@ -38,6 +38,7 @@ class Iam(AWSResourceBase):
         self.attach_policies_and_group()
 
     def describe(self, verbiage=4):
+        logger.debug("AWSIam.describe")
         if verbiage < 1:
             rtn = { 'iam-user': self._describe_iam_user(), }
         elif verbiage >= 1:
