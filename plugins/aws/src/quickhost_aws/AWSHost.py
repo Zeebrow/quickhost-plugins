@@ -138,8 +138,6 @@ class AWSHost(AWSResourceBase):
         except ClientError as e:
             logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
             raise e
-        # {'TerminatingInstances': [{'CurrentState': {'Code': 32, 'Name': 'shutting-down'}, 'InstanceId': 'i-090ab1a37ba8583bd', 'PreviousState': {'Code': 16, 'Name': 'running'}}], 'ResponseMetadata': {'RequestId': 'bf923b37-a043-4150-8654-d4fcbca4b0bc', 'HTTPStatusCode': 200, 'HTTPHeaders': {'x-amzn-requestid': 'bf923b37-a043-4150-8654-d4fcbca4b0bc', 'cache-control': 'no-cache, no-store', 'strict-transport-security': 'max-age=31536000; includeSubDomains', 'vary': 'accept-encoding', 'content-type': 'text/xml;charset=UTF-8', 'transfer-encoding': 'chunked', 'date': 'Sun, 03 Jul 2022 00:31:55 GMT', 'server': 'AmazonEC2'}, 'RetryAttempts': 0}}
-        print(f"{response=}")
 
     def get_instance_ids(self, *states): #state_list=[AWSHostState.running]) -> List[str]:
         """Given the app_name, returns the instance id off all instances with a State of 'running'"""

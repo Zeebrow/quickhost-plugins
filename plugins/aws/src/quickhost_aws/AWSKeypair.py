@@ -35,9 +35,7 @@ class KP(AWSResourceBase):
                     self.app_name
                 ],
                 DryRun=False,
-                # @@@No idea why the docs differ so much from what I'm able to code
-                # It just means less copy-pasting, I suppose.
-                #IncludePublicKey=True
+                IncludePublicKey=True
             )
         except ClientError as e: 
             logger.debug(f"No key for app '{self.app_name}'?\n{e}")
@@ -91,29 +89,24 @@ class KP(AWSResourceBase):
     def describe(self):
         rtn = {
             'key_id': UNDEFINED,
-            'fingerprint': UNDEFINED, 
+            'key_fingerprint': UNDEFINED, 
         }
         try:
             existing_key = self.client.describe_key_pairs(
                 KeyNames=[ self.app_name ],
                 DryRun=False,
-                # @@@The docs clearly show this param: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Client.describe_key_pairs
-                # but it throws an error
                 IncludePublicKey=True
             )
             rtn['key_id']           = existing_key['KeyPairs'][0]['KeyPairId']
             rtn['key_fingerprint']  = existing_key['KeyPairs'][0]['KeyFingerprint']
-            store_test_data(resource='AWSKeypair', action='describe_key_pairs', response_data=scrub_datetime(response))
+            store_test_data(resource='AWSKeypair', action='describe_key_pairs', response_data=scrub_datetime(existing_key))
             return rtn
         except ClientError as e:
             code = e.__dict__['response']['Error']['Code']
-            if code == 'UnauthorizedOperation':
-                logger.error(f"({code}): {e.operation_name}")
-                return rtn
             if code == 'InvalidKeyPair.NotFound':
-                logger.error(f"({code}): {e.operation_name}")
+                logger.debug(f"({code}): {e.operation_name}")
                 rtn['key_id'] = None
-                rtn['fingerprint'] = None
+                rtn['key_fingerprint'] = None
                 return rtn
             else:
                 logger.error(f"(Key Pair) Unhandled botocore client exception: ({code}): {e}")
@@ -128,12 +121,11 @@ class KP(AWSResourceBase):
             return False
         try:
             del_key = self.client.delete_key_pair(
-                KeyName=self.app_name,
                 KeyPairId=key_id,
                 DryRun=False
             )
             print(f"{del_key=}")
-            #quickhost.store_test_data(resource='KP', action='destroy', response_data=_del_key)
+            store_test_data(resource='AWSKeyPair', action='delete_key_pair', response_data=del_key)
             if ssh_key_file.exists():
                 os.remove(ssh_key_file)
                 logger.debug(f"removed keyfile '{ssh_key_file.name}'")

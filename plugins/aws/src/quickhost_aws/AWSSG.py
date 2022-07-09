@@ -25,6 +25,8 @@ class SG(AWSResourceBase):
             self.caller_info = self._client_caller_info
         self.app_name = app_name
         self.vpc_id = vpc_id
+        self.region = region
+        self.profile = profile
 
     def get_security_group_id(self) -> str:
         dsg = None
@@ -36,7 +38,8 @@ class SG(AWSResourceBase):
                     { 'Name': 'group-name', 'Values': [ self.app_name, ] },
                 ],
             )
-            return get_single_result_id(resource=dsg, resource_type='SecurityGroup', plural=True)
+            return dsg['SecurityGroups'][0]['GroupId']
+            #return get_single_result_id(resource=dsg, resource_type='SecurityGroup', plural=True)
         except botocore.exceptions.ClientError as e:
             print(e)
             print(e['Error'])
@@ -107,14 +110,14 @@ class SG(AWSResourceBase):
                 IpPermissions=perms,
                 DryRun=False
             )
-            #print(f"done ({[i for i in cidrs]}:{[p for p in ports]})")
+            return True
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
                 logger.info(f"No security group found for app '{self.app_name}', skipping...")
-                return
+                return False
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
-                return
+                return False
 
     def describe(self):
         logger.debug("AWSSG.describe")
@@ -133,9 +136,9 @@ class SG(AWSResourceBase):
             self.sgid = response['SecurityGroups'][0]['GroupId']
             for p in response['SecurityGroups'][0]['IpPermissions']:
                 for ipr in p['IpRanges']:
-                    cidrs.append(ipr['CidrIp'])
+                    rtn['cidrs'].append(ipr['CidrIp'])
                 if p['ToPort'] == p['FromPort']:
-                    ports.append("{}/{}".format(
+                    rtn['ports'].append("{}/{}".format(
                         p['ToPort'],
                         p['IpProtocol']
                     ))
@@ -146,9 +149,11 @@ class SG(AWSResourceBase):
                         p['IpProtocol']
                     ))
             rtn['sgid']     = response['SecurityGroups'][0]['GroupId'] 
-            rtn['ports']    = ports
-            rtn['cidrs']    = cidrs
             store_test_data(resource='AWSSG', action='describe_security_groups', response_data=scrub_datetime(response))
+            return rtn 
+        except IndexError:
+            logger.debug("No security group with name {} found for region {}".format(self.app_name, self.region))
+            return None
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
                 self.sgid = None
@@ -156,5 +161,3 @@ class SG(AWSResourceBase):
                 rtn['sgid'] = None
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
-        finally:
-            return rtn

@@ -205,13 +205,19 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     def run_destroy(self, args: dict):
         logger.debug('destroy')
+        rc = QHExit.GENERAL_FAILURE
+        stdout = None
+        stderr = None
         prompt_continue = input("proceed? (y/n)")
         if not prompt_continue == 'y':
             print("aborted.")
             return QHExit.ABORTED
-        params = self._parse_destroy(args)
-        self.destroy(params)
-        return QHExit.OK
+        try:
+            self.destroy(self._parse_destroy(args))
+        except QuickhostUnauthorized as e:
+            stderr = "Unauthorized: {}".format(e)
+            rc = QHExit.FAIL_AUTH
+        return (rc, stdout, stderr)
 
     def run(self, args: dict):
         """
@@ -329,12 +335,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         return args
         
     def _parse_destroy(self, args: dict):
-        destroy_params = {}
-        flags = args.keys()
-        return {
-            'app_name': self.app_name,
-            'config_file': self.config_file
-        }
+        return args
 
     def _print_loaded_args(self, d: dict, heading=None) -> None:
         """print the currently loaded app parameters"""
@@ -457,8 +458,8 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         )
         kp.create()
         sgid = sg.create(
-            ports=self.ports,
-            cidrs=self.cidrs
+            ports=params['ports'],
+            cidrs=params['cidrs'],
         )
         if params['ami'] is None:
             print("No ami specified, getting latest al2...", end='')
@@ -493,16 +494,22 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     def destroy(self, args: dict):
         self.load_default_config()
-        kp = KP(
+        params = self._parse_destroy(args)
+        KP(
             app_name=self.app_name,
+            region=params['region'],
             # @@@ ...
             #ssh_key_filepath=params['ssh_key_filepath'],
         ).destroy()
-        hosts = AWSHost( app_name=self.app_name,)
+        hosts = AWSHost(
+            region=params['region'],
+            app_name=self.app_name,
+        )
         hc = hosts.get_host_count()
         print(f"{hc=}")
         hosts.destroy()
-        sg = SG(
+        SG(
+            region=params['region'],
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         ).destroy()
