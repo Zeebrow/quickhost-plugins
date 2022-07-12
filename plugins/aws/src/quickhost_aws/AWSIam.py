@@ -29,7 +29,7 @@ class Iam(AWSResourceBase):
     def create(self):
         if self.caller_info['username'] == AWSConstants.DEFAULT_IAM_USER:
             logger.warning(f"The default quickhost user is not allowed to 'init'!")
-            raise QuickhostUnauthorized(f"The default quickhost user is not allowed to 'init'!")
+            raise QuickhostUnauthorized(f"The default quickhost user is not allowed to 'init'!",  operation='app init')
         current_policies = self._describe_user_credentials()
         self.create_user_group()
         self._create_user_config()

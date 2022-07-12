@@ -12,42 +12,17 @@ from quickhost import APP_CONST as QHC
 from quickhost.temp_data_collector import store_test_data
 
 from .AWSSG import SG
-from .constants import AWSConstants as AWS
-from .AWSResource import AWSResourceBase
 from .constants import AWSConstants
+from .AWSResource import AWSResourceBase
+from .AWSConfig import HostState, AWSHostConfig
+
 
 logger = logging.getLogger(__name__)
-
-class HostState:
-    running = 'running'
-    pending = 'pending' 
-    shutting_down = 'shutting-down' 
-    terminated = 'terminated' 
-    stopping = 'stopping' 
-    stopped = 'stopped' 
-    @classmethod
-    def allofem(self):
-        return [
-            "running",
-            "pending",
-            "shutting_down",
-            "terminated",
-            "stopping",
-            "stopped",
-        ]
-    @classmethod
-    def butnot(self,*states):
-        rtn = list(HostState.allofem())
-        [rtn.remove(i) for i in states]
-        return rtn
-
 
 class AWSHost(AWSResourceBase):
     def __init__(
             self,
             app_name,
-#            vpc_id,
-#            subnet_id,
             profile=AWSConstants.DEFAULT_IAM_USER,
             region=AWSConstants.DEFAULT_REGION
         ): #sigh
@@ -57,10 +32,8 @@ class AWSHost(AWSResourceBase):
             self.caller_info = self._client_caller_info
         self.app_name=app_name
         self.host_count = None
-#        self.vpc_id = vpc_id,
-#        self.subnet_id = subnet_id,
 
-    def create(self, num_hosts, instance_type, sgid, subnet_id, userdata, key_name, dry_run=False, image_id=AWS.DEFAULT_HOST_OS):
+    def create(self, num_hosts, instance_type, sgid, subnet_id, userdata, key_name, dry_run=False, image_id=AWSConstants.DEFAULT_HOST_OS):
         self.host_count = num_hosts
         if self.get_host_count() > 0:
             logger.error(f"Hosts for app '{self.app_name}' already exist")
@@ -91,7 +64,10 @@ class AWSHost(AWSResourceBase):
                 }
             ],
             'TagSpecifications':[
-                { 'ResourceType': 'instance', 'Tags': [ { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name}, ] },
+                { 'ResourceType': 'instance', 'Tags': [
+                    { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name}, 
+                    { 'Key': "Name", 'Value': self.app_name}, 
+                    ] },
             ],
         }
         if userdata:
@@ -134,10 +110,10 @@ class AWSHost(AWSResourceBase):
             response = self.client.terminate_instances(
                 InstanceIds=tgt_instances
             )
-            self.wait_for_hosts_to_terminate(tgt_instances=tgt_instances)
         except ClientError as e:
-            logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
-            raise e
+            logger.error(e)
+
+        return self.wait_for_hosts_to_terminate(tgt_instances=tgt_instances)
 
     def get_instance_ids(self, *states): #state_list=[AWSHostState.running]) -> List[str]:
         """Given the app_name, returns the instance id off all instances with a State of 'running'"""
@@ -151,7 +127,7 @@ class AWSHost(AWSResourceBase):
             DryRun=False,
             MaxResults=10,
         )
-        store_test_data(resource='AWSHost', action='describe', response_data=quickhost.scrub_datetime(all_hosts))
+        store_test_data(resource='AWSHost', action='describe_instances', response_data=quickhost.scrub_datetime(all_hosts))
         # fishy
         instance_ids = []
         for r in all_hosts['Reservations']:
@@ -240,16 +216,21 @@ class AWSHost(AWSResourceBase):
         waiting_on_hosts = []
         other_hosts = []
         tgt_count = len(tgt_instances)
-        while not True:
+#        logger.debug(tgt_instances)
+#        logger.debug(tgt_count)
+        while True:
             app_hosts = quickhost.scrub_datetime(self.client.describe_instances(
                 Filters=[
                     { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
-                    { 'Name': f"instance-state-name", 'Values': [HostState.terminated, HostState.shutting_down] },
+                    { 'Name': f"instance-state-name", 'Values': [HostState.running, HostState.terminated, HostState.shutting_down] },
                 ],
                 DryRun=False,
                 MaxResults=10,
             ))
+#            logger.debug(quickhost.scrub_datetime(app_hosts))
+#            logger.debug(f"reservations: {len(app_hosts['Reservations'])}")
             for r in app_hosts['Reservations']:
+                logger.debug(f"instances in reservation: {len(r['Instances'])}")
                 for i,host in enumerate(r['Instances']):
                     if host['InstanceId'] in tgt_instances:
                         if host['State']['Name'] == HostState.terminated:

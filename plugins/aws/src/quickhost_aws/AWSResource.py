@@ -18,6 +18,8 @@ class AWSResourceBase:
         sts = session.client('sts')
         whoami = sts.get_caller_identity()
         whoami['username'] = self._get_user_name_from_arn(whoami['Arn'])
+        whoami['region'] =  session.region_name
+        whoami['profile'] =  session.profile_name
         _ = whoami.pop('ResponseMetadata')
 
         if self._get_user_name_from_arn(whoami['Arn']) != AWSConstants.DEFAULT_IAM_USER:
@@ -29,6 +31,8 @@ class AWSResourceBase:
         sts = session.client('sts')
         whoami = sts.get_caller_identity()
         whoami['username'] = self._get_user_name_from_arn(whoami['Arn'])
+        whoami['region'] =  session.region_name
+        whoami['profile'] =  session.profile_name
         _ = whoami.pop('ResponseMetadata')
 
         if self._get_user_name_from_arn(whoami['Arn']) != AWSConstants.DEFAULT_IAM_USER:

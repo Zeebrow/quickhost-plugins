@@ -507,7 +507,9 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         )
         hc = hosts.get_host_count()
         print(f"{hc=}")
-        hosts.destroy()
+        rc = hosts.destroy()
+        if not rc:
+            logger.debug(f"If the Security Group fails to destroy, it may be because its dependent resources (the app hosts) are not done terminating.")
         SG(
             region=params['region'],
             app_name=self.app_name,
