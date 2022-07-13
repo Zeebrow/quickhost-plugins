@@ -67,7 +67,10 @@ class AWSHost(AWSResourceBase):
                 { 'ResourceType': 'instance', 'Tags': [
                     { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name}, 
                     { 'Key': "Name", 'Value': self.app_name}, 
-                    ] },
+                ]},
+                { 'ResourceType': 'volume', 'Tags': [
+                    { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name}, 
+                ]},
             ],
         }
         if userdata:
@@ -100,7 +103,7 @@ class AWSHost(AWSResourceBase):
             raise e
         return instances
 
-    def destroy(self):
+    def destroy(self) -> bool:
         logger.debug(f"destroying instnaces: ")
         tgt_instances = self.get_instance_ids(HostState.running)
         if tgt_instances is None:
@@ -110,8 +113,10 @@ class AWSHost(AWSResourceBase):
             response = self.client.terminate_instances(
                 InstanceIds=tgt_instances
             )
+            store_test_data(resource='AWSHost', action='terminate_instances', response_data=quickhost.scrub_datetime(response))
         except ClientError as e:
             logger.error(e)
+            return False
 
         return self.wait_for_hosts_to_terminate(tgt_instances=tgt_instances)
 
@@ -211,13 +216,10 @@ class AWSHost(AWSResourceBase):
     def wait_for_hosts_to_terminate(self, tgt_instances):
         """'blocks' until a the specified hosts tagged as 'app_name' have a State Name of 'running'"""
         print(f"===================Waiting on hosts for '{self.app_name}'=========================")
-        #instances = []
         ready_hosts = []
         waiting_on_hosts = []
         other_hosts = []
         tgt_count = len(tgt_instances)
-#        logger.debug(tgt_instances)
-#        logger.debug(tgt_count)
         while True:
             app_hosts = quickhost.scrub_datetime(self.client.describe_instances(
                 Filters=[
@@ -227,22 +229,18 @@ class AWSHost(AWSResourceBase):
                 DryRun=False,
                 MaxResults=10,
             ))
-#            logger.debug(quickhost.scrub_datetime(app_hosts))
-#            logger.debug(f"reservations: {len(app_hosts['Reservations'])}")
             for r in app_hosts['Reservations']:
-                logger.debug(f"instances in reservation: {len(r['Instances'])}")
                 for i,host in enumerate(r['Instances']):
                     if host['InstanceId'] in tgt_instances:
                         if host['State']['Name'] == HostState.terminated:
                             if not (host['InstanceId'] in ready_hosts):
-                                #instances.append(self._descibe_instance(host))
                                 ready_hosts.append(host['InstanceId'])
                         elif host['State']['Name'] == HostState.shutting_down:
                             if not (host['InstanceId'] in waiting_on_hosts):
                                 waiting_on_hosts.append(host['InstanceId'])
                         else:
+                            # catch any 'running' instances whos status may not be reflected by the thime this function is called
                             if not (host['InstanceId'] in other_hosts):
-                                logger.debug("Y U HERE BUG")
                                 other_hosts.append(host['InstanceId'])
             print(f"""({len(ready_hosts)}/{tgt_count}) Ready ({len(ready_hosts)}): {ready_hosts} Waiting: ({len(waiting_on_hosts)}): {[l for l in waiting_on_hosts]}\r""", end='')
             if tgt_count == len(ready_hosts):

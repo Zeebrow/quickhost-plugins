@@ -407,6 +407,7 @@ class Iam(AWSResourceBase):
         finally:
             return rtn
 
+# see tmp/PolicyData-lambda.py for slightly-updated
 PolicyData = lambda QUICKHOST_ACCOUNT: {
     'create':{
         "Version": "2012-10-17",

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import NewType, List
+from collections import namedtuple
 
 """
 These are utility functions, types, etc.
@@ -10,7 +11,6 @@ Region = NewType('Region', str)
 Port = NewType('Port', int)
 Cidr = NewType('Cidr', str)
 #HostState = NewType('HostState', str)
-
 
 @dataclass
 class AWSHostConfig:

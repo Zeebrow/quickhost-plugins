@@ -9,6 +9,7 @@ tmp
 *.json
 **.tar.gz
 **/*.swp
+**/*.swo
 **.pem
 ###
 

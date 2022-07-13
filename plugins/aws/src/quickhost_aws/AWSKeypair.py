@@ -38,16 +38,15 @@ class KP(AWSResourceBase):
                 IncludePublicKey=True
             )
         except ClientError as e: 
-            logger.debug(f"No key for app '{self.app_name}'?\n{e}")
             return None
         return get_single_result_id(resource=existing_key, resource_type='KeyPair', plural=True)
-        
-    def create(self, ssh_key_filepath=None):
-        """Make a new ec2 keypair named for app"""
-        existing_key_pair = self.describe()
+
+    def _create_ssh_key_file(key_material: str, ssh_key_filepath=None):
+        rtn = True
         if ssh_key_filepath is None:
             # not overriden from config, set default
             # @@@ just use ~/.ssh...
+            # @@@ actually dont
             tgt_file = Path(f"./{self.app_name}.pem")
         else:
             if not ssh_key_filepath.endswith('.pem'):
@@ -56,10 +55,30 @@ class KP(AWSResourceBase):
                 tgt_file = Path(ssh_key_filepath)
         if tgt_file.exists():
             logger.warning(f"overwriting pem file '{tgt_file.absolute()}'")
+            rtn = False
 
-        if existing_key_pair['key_id'] is UNDEFINED:
-            raise Exception("Failed to get key information")
-        elif existing_key_pair['key_id'] == None:
+        try:
+            with tgt_file.open('w') as pemf:
+                pemf.writelines(key_material)
+                os.chmod(tgt_file.absolute(), 0o600)
+            logger.debug(f"saved private key to file '{tgt_file.absolute()}'")
+        except Exception as e:
+            logger.error(f"Exception creating ssh keyfile: {e}")
+            rtn = False
+
+        return rtn
+        
+    def create(self, ssh_key_filepath=None) -> bool:
+        """Make a new ec2 keypair named for app"""
+        existing_key_pair = self.describe()
+        self.key_id = existing_key_pair['key_id']
+        self.key_fingerprint = existing_key_pair['key_id']
+
+        if self.key_id is not None:
+            #NOTE: You can't retreive key material unless you are creating the key
+            logger.warning(f"Ssh key already exists with id '{self.key_id}'")
+        else:
+            rtn = True
             new_key = self.client.create_key_pair(
                 KeyName=self.key_name,
                 DryRun=False,
@@ -73,23 +92,20 @@ class KP(AWSResourceBase):
                     },
                 ],
             )
-            with tgt_file.open('w') as pemf:
-                pemf.writelines(new_key['KeyMaterial'])
-                os.chmod(tgt_file.absolute(), 0o600)
-            logger.debug(f"saved private key to file '{tgt_file.absolute()}'")
+            safe_response = new_key
+            safe_response['KeyMaterial'] = "XXXXXXXXXX"
+            store_test_data(resource='AWSKeyPair', action='create_key_pair', response_data=new_key)
+
+            rtn = self._create_ssh_key_file(key_material=new_key['KeyMaterial'], ssh_key_filepath=ssh_key_filepath)
             self.key_id = new_key['KeyPairId']
             self.fingerprint = new_key['KeyFingerprint']
             del new_key
-            print(f"Created new key pair ({self.key_id})")
-            return True
-        else:
-            logger.debug(f"key exists with id {existing_key_pair['key_id']}")
-            return False
+            return rtn
 
     def describe(self):
         rtn = {
-            'key_id': UNDEFINED,
-            'key_fingerprint': UNDEFINED, 
+            'key_id': None,
+            'key_fingerprint': None,
         }
         try:
             existing_key = self.client.describe_key_pairs(
@@ -117,7 +133,7 @@ class KP(AWSResourceBase):
             ssh_key_file=Path(self.app_name + '.pem')
         key_id = self.get_key_id()
         if not key_id:
-            logger.debug(f"No key for app '{self.app_name}'")
+            logger.warning(f"No key for app '{self.app_name}'")
             return False
         try:
             del_key = self.client.delete_key_pair(
@@ -129,9 +145,10 @@ class KP(AWSResourceBase):
             if ssh_key_file.exists():
                 os.remove(ssh_key_file)
                 logger.debug(f"removed keyfile '{ssh_key_file.name}'")
+                return True
             else:
                 logger.warning(f"Couldn't find key file '{ssh_key_file.name}' to remove!")
-            return True
+                return False
         except ClientError as e:
             handle_client_error(e)
             logger.warning(f"failed to delete keypair for app '{self.app_name}' (id: '{key_id}'):\n {e}")

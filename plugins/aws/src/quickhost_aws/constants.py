@@ -24,3 +24,4 @@ class AWSConstants:
         'us-west-1',
         'us-west-2'
     ]
+    PLUGIN_ID = 'aaaaaaaaaaaaaa'

@@ -12,7 +12,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 import quickhost
-from quickhost import APP_CONST as QHC, QHExit
+from quickhost import APP_CONST as QHC, QHExit, CliResponse
 
 from .AWSResource import AWSResourceBase
 from .AWSIam import Iam
@@ -166,9 +166,9 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
     def run_init(self, args: dict) -> Tuple[QHExit, str, str]:
         """must be run as an admin-like user"""
         logger.debug('run init')
+        stdout = ""
+        stderr = ""
         rc = QHExit.GENERAL_FAILURE
-        stdout = None
-        stderr = None
 
         try:
             rc = self.plugin_init(args)
@@ -177,17 +177,27 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             stderr = "Unauthorized: {}".format(e)
             stderr += "\nTry specifiying a different user with --profile."
             rc = QHExit.FAIL_AUTH
-        return (rc, stdout, stderr)
+        return CliResponse(stdout, stderr, rc)
 
     def run_make(self, args: dict):
         logger.debug('make')
+        stdout = ""
+        stderr = ""
+        rc = QHExit.FAIL_AUTH
+
         prompt_continue = input("proceed? (y/n)")
         if not prompt_continue == 'y':
-            print("aborted.")
-            return QHExit.ABORTED
-        params = self._parse_make(args)
-        self.create(args)
-        return QHExit.OK
+            stderr = "aborted"
+            return CliResponse(stdout, stderr, QHExit.ABORTED)
+
+        try:
+            params = self._parse_make(args)
+            return self.create(args)
+        except QuickhostUnauthorized as e:
+            stderr = "Unauthorized: {}".format(e)
+            stderr += "\nTry specifiying a different user with --profile."
+            rc = QHExit.FAIL_AUTH
+        return CliResponse(stdout, stderr, QHExit.ABORTED)
 
     def run_describe(self, args: dict):
         logger.debug('run describe')
@@ -363,7 +373,8 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             logger.warning("There's nowhere to show your results!")
         return None
 
-    def plugin_init(self, init_args: dict):
+    # @@@ CliResponse
+    def plugin_init(self, init_args: dict) -> CliResponse:
         """
         Setup the following:
         - IAM user/group/policies/credentials
@@ -393,14 +404,15 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             **params
         )
         #print(json.dumps(networking_params.describe(), indent=2))
+        p = networking_params.destroy()
         p = networking_params.create()
-        #p = networking_params.destroy()
         #p = networking_params.get()
         #print(p)
         #print(json.dumps(networking_params.describe(), indent=2))
         return 
 
-    def describe(self, args: dict) -> None:
+    # @@@ CliResponse
+    def describe(self, args: dict) -> CliResponse:
         params = self._parse_describe(args)
         networking_params = self.load_default_config(
             region=params['region']
@@ -409,19 +421,22 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         iam_vals = Iam(
             region=params['region'],
         ).describe(verbiage=1)
-        sg_vals = SG(
+        sg = SG(
             region=params['region'],
             app_name=self.app_name,
             vpc_id=self.vpc_id,
-        ).describe()
-        kp_vals = KP(
+        )
+        sg_describe = sg.describe()
+        kp = KP(
             app_name=self.app_name,
             region=params['region']
-        ).describe()
-        host_vals = AWSHost(
+        )
+        kp_describe = kp.describe()
+        hosts = AWSHost(
             app_name=self.app_name,
             region=params['region']
-        ).describe()
+        )
+        hosts_describe = hosts.describe()
         # idk man
         caller_info = {
             'account': self.account,
@@ -430,13 +445,17 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         self._print_loaded_args(networking_params,heading=f"global params")
         self._print_loaded_args(caller_info)
         self._print_loaded_args(iam_vals)
-        self._print_loaded_args(sg_vals)
-        self._print_loaded_args(kp_vals)
-        for i,host in enumerate(host_vals):
+        self._print_loaded_args(sg_describe)
+        self._print_loaded_args(kp_describe)
+        for i,host in enumerate(hosts_describe):
             self._print_loaded_args(host, heading=f"host {i}")
-        return QHExit.OK
-
-    def create(self, args: dict):
+        if kp_describe and hosts_describe and sg_describe:
+            return CliResponse(QHExit.OK, 'Done', '')
+        else:
+            return CliResponse(QHExit.GENERAL_FAILURE, 'finished creating hosts with errors', f"{kp_describe=}, {hosts_describe=}, {sg_describe=}")
+    
+    # @@@ CliResponse
+    def create(self, args: dict) -> CliResponse:
         params = self._parse_make(args)
         self.load_default_config(region=params['region'])
         profile = AWSConstants.DEFAULT_IAM_USER
@@ -456,8 +475,8 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             region=params['region'],
             profile=profile
         )
-        kp.create()
-        sgid = sg.create(
+        kp_created = kp.create()
+        sg_created = sg.create(
             ports=params['ports'],
             cidrs=params['cidrs'],
         )
@@ -465,54 +484,45 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             print("No ami specified, getting latest al2...", end='')
             ami = host.get_latest_image()
             print(f"done ({ami})")
-#        host.create(
-#            num_hosts=self.num_hosts,
-#            image_id=ami,
-#            instance_type=self.instance_type,
-#            subnet_id=self.subnet_id,
-#            sgid=sgid,
-#            key_name=self.key_name,
-#            userdata=self.userdata,
-#            dry_run=self.dry_run
-#        )
-        host.create(
+        hosts_created = host.create(
             subnet_id=self.subnet_id,
             num_hosts=params['host_count'],
             image_id=ami,
             instance_type=params['instance_type'],
-            sgid=sgid,
+            sgid=sg.sgid,
             key_name=params['key_name'],
             userdata=params['userdata'],
             dry_run=params['dry_run']
         )
         #_host.get_ssh()
-        print('Done')
-        return QHExit.OK 
+        if kp_created and hosts_created and sg_created:
+            return CliResponse( 'Done', '',QHExit.OK)
+        else:
+            return CliResponse('finished creating hosts with errors', f"{kp_created=}, {hosts_created=}, {sg_created=}", QHExit.GENERAL_FAILURE)
 
-    def update(self):
+    def update(self) -> CliResponse:
         pass
 
-    def destroy(self, args: dict):
+    def destroy(self, args: dict) -> CliResponse:
         self.load_default_config()
         params = self._parse_destroy(args)
-        KP(
+        kp_destroyed = KP(
             app_name=self.app_name,
             region=params['region'],
-            # @@@ ...
-            #ssh_key_filepath=params['ssh_key_filepath'],
         ).destroy()
         hosts = AWSHost(
             region=params['region'],
             app_name=self.app_name,
         )
-        hc = hosts.get_host_count()
-        print(f"{hc=}")
-        rc = hosts.destroy()
+        hosts_destroyed = hosts.destroy()
         if not rc:
             logger.debug(f"If the Security Group fails to destroy, it may be because its dependent resources (the app hosts) are not done terminating.")
-        SG(
+        sg_destroyed = SG(
             region=params['region'],
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         ).destroy()
-        return QHExit.OK 
+        if kp_destroyed and hosts_destroyed and sg_destroyed:
+            return CliResponse( 'Done', '', QHExit.OK)
+        else:
+            return CliResponse('finished destroying hosts with errors', f"{kp_destroyed=}, {hosts_destroyed=}, {sg_destroyed=}", QHExit.GENERAL_FAILURE)

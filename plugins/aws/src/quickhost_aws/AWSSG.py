@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import Tuple, List, Union
 from dataclasses import dataclass
 import logging
 import json
@@ -57,7 +57,8 @@ class SG(AWSResourceBase):
             logger.debug(f"No security groups found for app '{self.app_name}'")
             return None
 
-    def create(self, cidrs, ports, dry_run=False):
+    def create(self, cidrs, ports, dry_run=False) -> bool:
+        rtn = True
         try:
             sg = self.client.create_security_group(
                 Description="Made by quickhost",
@@ -71,31 +72,36 @@ class SG(AWSResourceBase):
                 DryRun=dry_run
             )
             self.sgid = sg['GroupId']
-            self._add_ingress(cidrs, ports)
-            #store_test_data(resource='SG', action='create', response_data=_sg)
-            return sg['GroupId']
+            store_test_data(resource='AWSSG', action='create_security_group', response_data=sg)
         except botocore.exceptions.ClientError as e:
-            logger.debug(f"Security Group already exists for '{self.app_name}':\n{e}")
-            return self.get_security_group_id()
+            logger.warning(f"Security Group already exists for '{self.app_name}':\n{e}")
+            self.sgid = self.get_security_group_id()
+            rtn = False
 
-    def destroy(self):
+        if not self._add_ingress(cidrs, ports):
+            rtn = False
+
+        return rtn
+
+    def destroy(self) -> bool:
         try:
             sg_id = self.get_security_group_id()
             if not sg_id:
-                logger.debug(f"No security group found for app '{self.app_name}'")
-                return None
+                logger.warning(f"No security group found for app '{self.app_name}'")
+                return False
+            # @@@ this returns None. Might want to confirm deletion.
             self.client.delete_security_group( GroupId=sg_id)
             logger.info(f"deleting security group '{sg_id}'")
+            return True
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
-                logger.info(f"No security group found for app '{self.app_name}', skipping...")
-                return
+                logger.warning(f"No security group found for app '{self.app_name}', skipping...")
+                return False
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
-                return
-        return
+                return False
 
-    def _add_ingress(self, cidrs, ports):
+    def _add_ingress(self, cidrs, ports) -> bool:
         try:
             perms = []
             for port in ports:
@@ -110,10 +116,13 @@ class SG(AWSResourceBase):
                 IpPermissions=perms,
                 DryRun=False
             )
+            store_test_data(resource='AWSSG', action='authorize_security_group_ingress', response_data=scrub_datetime(response))
+            self.ports = ports
+            self.cidrs = cidrs
             return True
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
-                logger.info(f"No security group found for app '{self.app_name}', skipping...")
+                logger.error(f"No security group found for app '{self.app_name}'")
                 return False
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
@@ -125,8 +134,10 @@ class SG(AWSResourceBase):
             'sgid': UNDEFINED, #giving this a try
             'ports': [],
             'cidrs': [],
+            'ok': True,
         }
         try:
+            self.sgid = None
             response = self.client.describe_security_groups(
                 Filters=[
                     { 'Name': 'vpc-id', 'Values': [ self.vpc_id, ] },
@@ -134,21 +145,14 @@ class SG(AWSResourceBase):
                 ],
             )
             self.sgid = response['SecurityGroups'][0]['GroupId']
-            for p in response['SecurityGroups'][0]['IpPermissions']:
-                for ipr in p['IpRanges']:
-                    rtn['cidrs'].append(ipr['CidrIp'])
-                if p['ToPort'] == p['FromPort']:
-                    rtn['ports'].append("{}/{}".format(
-                        p['ToPort'],
-                        p['IpProtocol']
-                    ))
-                else:
-                    ports.append("{0}/{2}-{1}/{2}".format(
-                        p['ToPort'],
-                        p['FromPort'],
-                        p['IpProtocol']
-                    ))
             rtn['sgid']     = response['SecurityGroups'][0]['GroupId'] 
+
+            ports, cidrs, ingress_ok = self._describe_sg_ingress(dsg_ip_permissions=response['SecurityGroups'][0]['IpPermissions'])
+            self.ports = ports
+            self.cidrs = cidrs
+            rtn['ports'] = ports
+            rtn['cidrs'] = cidrs
+
             store_test_data(resource='AWSSG', action='describe_security_groups', response_data=scrub_datetime(response))
             return rtn 
         except IndexError:
@@ -159,5 +163,37 @@ class SG(AWSResourceBase):
                 self.sgid = None
                 logger.error(f"No security group found for app '{self.app_name}' (does the app exist?)")
                 rtn['sgid'] = None
+                rtn['ok'] = False
             else:
                 logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
+                rtn['sgid'] = None
+                rtn['ok'] = False
+
+                # @@@ uhhhh
+
+    def _describe_sg_ingress(self, dsg_ip_permissions: dict) -> Tuple[List[str], List[str], bool]:
+        ports = []
+        cidrs = []
+        ok = True
+        try:
+            for p in dsg_ip_permissions:
+                for ipr in p['IpRanges']:
+                    cidrs.append(ipr['CidrIp'])
+                if p['ToPort'] == p['FromPort']:
+                    ports.append("{}/{}".format(
+                        p['ToPort'],
+                        p['IpProtocol']
+                    ))
+                else:
+                    ports.append("{0}/{2}-{1}/{2}".format(
+                        p['ToPort'],
+                        p['FromPort'],
+                        p['IpProtocol']
+                    ))
+        except Exception as e:
+            ok = False
+
+        return (ports, cidrs, ok)
+
+
+
