@@ -171,8 +171,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         rc = QHExit.GENERAL_FAILURE
 
         try:
-            rc = self.plugin_init(args)
-            stdout = 'Done.'
+            stdout, stderr, rc = self.plugin_init(args)
         except QuickhostUnauthorized as e:
             stderr = "Unauthorized: {}".format(e)
             stderr += "\nTry specifiying a different user with --profile."
@@ -183,7 +182,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         logger.debug('make')
         stdout = ""
         stderr = ""
-        rc = QHExit.FAIL_AUTH
+        rc = QHExit.GENERAL_FAILURE
 
         prompt_continue = input("proceed? (y/n)")
         if not prompt_continue == 'y':
@@ -191,43 +190,46 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             return CliResponse(stdout, stderr, QHExit.ABORTED)
 
         try:
-            params = self._parse_make(args)
-            return self.create(args)
+            params =  self._parse_make(args) # @@@@@@@@@@ shitshitshit
+            #stdout, stderr, rc = self.create(params) # @@@@@@@@@@ shitshitshit
+            stdout, stderr, rc = self.create(args) # @@@@@@@@@@ shitshitshit
         except QuickhostUnauthorized as e:
             stderr = "Unauthorized: {}".format(e)
             stderr += "\nTry specifiying a different user with --profile."
             rc = QHExit.FAIL_AUTH
-        return CliResponse(stdout, stderr, QHExit.ABORTED)
+        return CliResponse(stdout, stderr, rc)
 
     def run_describe(self, args: dict):
         logger.debug('run describe')
-        rc = QHExit.GENERAL_FAILURE
-        stdout = None
+        stdout = ""
         stderr = None
+        rc = QHExit.GENERAL_FAILURE
+
         try:
-            rc = self.describe(args)
-            stderr = ''
+            stdout, stderr, rc = self.describe(args)
         except QuickhostUnauthorized as e:
             stderr = "Unauthorized: {}".format(e)
             stderr += "\nTry specifiying a different user with --profile."
             rc = QHExit.FAIL_AUTH
-        return (rc, stdout, stderr)
+        return CliResponse(stdout, stderr, rc)
 
     def run_destroy(self, args: dict):
         logger.debug('destroy')
+        stdout = ""
+        stderr = ""
         rc = QHExit.GENERAL_FAILURE
-        stdout = None
-        stderr = None
+
         prompt_continue = input("proceed? (y/n)")
         if not prompt_continue == 'y':
             print("aborted.")
-            return QHExit.ABORTED
+            rc = QHExit.ABORTED
+            return CliResponse(rc, stdout, stderr)
         try:
-            self.destroy(self._parse_destroy(args))
+            stdout, stderr, rc = self.destroy(self._parse_destroy(args))
         except QuickhostUnauthorized as e:
             stderr = "Unauthorized: {}".format(e)
             rc = QHExit.FAIL_AUTH
-        return (rc, stdout, stderr)
+        return CliResponse(stdout, stderr, rc)
 
     def run(self, args: dict):
         """
@@ -391,8 +393,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         
         inp = input(f"About to initialize quickhost using:\nuser:\t\t{user_name} ({user_id})\naccount:\t{account}\n\nContinue? (y/n)")
         if not inp.lower() == ('y' or 'yes'):
-            print('Aborted')
-            exit(3)
+            return CliResponse(None, 'aborted', QHExit.ABORTED)
         qh_iam = Iam(**params)
         #print(json.dumps(qh_iam.describe(), indent=2))
         #qh_iam.destroy()
@@ -404,12 +405,15 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             **params
         )
         #print(json.dumps(networking_params.describe(), indent=2))
-        p = networking_params.destroy()
+        #p = networking_params.destroy()
         p = networking_params.create()
         #p = networking_params.get()
         #print(p)
         #print(json.dumps(networking_params.describe(), indent=2))
-        return 
+        if True: #@@@
+            return CliResponse('Done', None, QHExit.OK)
+        else:
+            return CliResponse('finished init with errors', "<placeholder>", QHExit.GENERAL_FAILURE)
 
     # @@@ CliResponse
     def describe(self, args: dict) -> CliResponse:
@@ -437,11 +441,11 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             region=params['region']
         )
         hosts_describe = hosts.describe()
-        # idk man
         caller_info = {
             'account': self.account,
             'invoking user': '/'.join(self.user.split('/')[1:])
         }
+        # idk man
         self._print_loaded_args(networking_params,heading=f"global params")
         self._print_loaded_args(caller_info)
         self._print_loaded_args(iam_vals)
@@ -450,9 +454,9 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         for i,host in enumerate(hosts_describe):
             self._print_loaded_args(host, heading=f"host {i}")
         if kp_describe and hosts_describe and sg_describe:
-            return CliResponse(QHExit.OK, 'Done', '')
+            return CliResponse('Done', None, QHExit.OK)
         else:
-            return CliResponse(QHExit.GENERAL_FAILURE, 'finished creating hosts with errors', f"{kp_describe=}, {hosts_describe=}, {sg_describe=}")
+            return CliResponse('finished creating hosts with errors', f"{kp_describe=}, {hosts_describe=}, {sg_describe=}", QHExit.GENERAL_FAILURE)
     
     # @@@ CliResponse
     def create(self, args: dict) -> CliResponse:
@@ -496,9 +500,9 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         )
         #_host.get_ssh()
         if kp_created and hosts_created and sg_created:
-            return CliResponse( 'Done', '',QHExit.OK)
+            return CliResponse( 'Done', None, QHExit.OK)
         else:
-            return CliResponse('finished creating hosts with errors', f"{kp_created=}, {hosts_created=}, {sg_created=}", QHExit.GENERAL_FAILURE)
+            return CliResponse('finished creating hosts with warnings', f"{kp_created=}, {hosts_created=}, {sg_created=}", QHExit.GENERAL_FAILURE)
 
     def update(self) -> CliResponse:
         pass
@@ -515,14 +519,12 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             app_name=self.app_name,
         )
         hosts_destroyed = hosts.destroy()
-        if not rc:
-            logger.debug(f"If the Security Group fails to destroy, it may be because its dependent resources (the app hosts) are not done terminating.")
         sg_destroyed = SG(
             region=params['region'],
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         ).destroy()
         if kp_destroyed and hosts_destroyed and sg_destroyed:
-            return CliResponse( 'Done', '', QHExit.OK)
+            return CliResponse('Done', '', QHExit.OK)
         else:
             return CliResponse('finished destroying hosts with errors', f"{kp_destroyed=}, {hosts_destroyed=}, {sg_destroyed=}", QHExit.GENERAL_FAILURE)
