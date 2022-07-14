@@ -93,10 +93,10 @@ class KP(AWSResourceBase):
                 ],
             )
             safe_response = new_key
+            rtn = self._create_ssh_key_file(new_key['KeyMaterial'], ssh_key_filepath)
+
             safe_response['KeyMaterial'] = "XXXXXXXXXX"
             store_test_data(resource='AWSKeyPair', action='create_key_pair', response_data=new_key)
-
-            rtn = self._create_ssh_key_file(new_key['KeyMaterial'], ssh_key_filepath)
             self.key_id = new_key['KeyPairId']
             self.fingerprint = new_key['KeyFingerprint']
             del new_key
