@@ -41,7 +41,7 @@ class KP(AWSResourceBase):
             return None
         return get_single_result_id(resource=existing_key, resource_type='KeyPair', plural=True)
 
-    def _create_ssh_key_file(key_material: str, ssh_key_filepath=None):
+    def _create_ssh_key_file(self, key_material: str, ssh_key_filepath=None):
         rtn = True
         if ssh_key_filepath is None:
             # not overriden from config, set default
@@ -96,7 +96,7 @@ class KP(AWSResourceBase):
             safe_response['KeyMaterial'] = "XXXXXXXXXX"
             store_test_data(resource='AWSKeyPair', action='create_key_pair', response_data=new_key)
 
-            rtn = self._create_ssh_key_file(new_key['KeyMaterial'], ssh_key_filepath=ssh_key_filepath)
+            rtn = self._create_ssh_key_file(new_key['KeyMaterial'], ssh_key_filepath)
             self.key_id = new_key['KeyPairId']
             self.fingerprint = new_key['KeyFingerprint']
             del new_key
