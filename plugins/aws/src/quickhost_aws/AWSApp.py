@@ -35,20 +35,14 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     Args need to be evaluated on their own terms, because context is so important... e.g.
     * 'ports' is not technically needed, but should be *settable* from CLI or Config
-    * 'config_file' is absolutely needed, and *cannot* be set from Config (environment variables are an interesting option)
     * 'ssh_key_filepath' is arguably not even a plugin argument
     """
     plugin_name = 'aws'
 
-    def __init__(self, app_name, config_file=None):
+    def __init__(self, app_name):
         self._client = boto3.client('ec2')
         self._ec2_resource = boto3.resource('ec2')
-        self.config_file = config_file
-        if config_file is None:
-            config_file = QHC.DEFAULT_CONFIG_FILEPATH
-        super().__init__('aws', app_name, config_file)
-        self._config_file_parser = quickhost.AppConfigFileParser()
-        self._config_file_parser.read(self.config_file)
+        super().__init__('aws', app_name)
         self.userdata = None
         self.ssh_key_filepath = None
         self.ami = None
@@ -82,32 +76,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         self.user = calling_user_arn.resource
         self.account = calling_user_arn.account
         return networking_params
-
-    def _old_load_default_config(self):
-        """
-        read values from config file, and import the relevant ones
-        run before load_cli_args()
-        """
-        try:
-            all_config = self._config_file_parser[self._all_cfg_key()]
-            for k in all_config:
-                if k in self.__dict__.keys():
-                    self.__dict__[k] = self._config_file_parser[self._all_cfg_key()][k]
-                else:
-                    logger.warning(f"Ignoring bad param in config: '{k}'")
-        except KeyError:
-            logger.debug(f"No '_all' config ({self._all_cfg_key()}) found in config file '{self.config_file}'")
-            all_config = None
-        try:
-            app_config = self._config_file_parser[self._app_cfg_key()]
-            for k in app_config:
-                if (k in self.__dict__.keys()) and (not k.startswith('_')):
-                    self.__dict__[k] = self._config_file_parser[self._app_cfg_key()][k]
-                else:
-                    logger.warning(f"Ignoring bad param in config: '{k}'")
-        except KeyError:
-            logger.debug(f"No app config ({self._app_cfg_key()}) found in config file '{self.config_file}'")
-            app_config = None
 
     def get_init_parser(self):
         init_parser = ArgumentParser("AWS init", add_help=False)
@@ -230,47 +198,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             stderr = "Unauthorized: {}".format(e)
             rc = QHExit.FAIL_AUTH
         return CliResponse(stdout, stderr, rc)
-
-    def run(self, args: dict):
-        """
-        eats a user's input from the CLI 'form' that parser_arguments() sets up. 
-        Subsequently calls an appropriate AWSApp CRUD method.
-        This method overrides AWSApp instance properties that were set after load_default_config() returns.
-        """
-        return QHExit.KNOWN_ISSUE
-        if args['__qhaction'] == 'init':
-            logger.debug('init')
-            self.plugin_init(args)
-            return QHExit.OK
-        elif args['__qhaction'] == 'make':
-            if not check_running_as_user():
-                return QHExit.NOT_QH_USER 
-            logger.debug('make')
-            params = self._parse_make(args)
-            self.create(args)
-            return QHExit.OK
-        elif args['__qhaction'] == 'describe':
-            if not check_running_as_user():
-                return QHExit.NOT_QH_USER 
-            logger.debug('describe')
-            self.describe(args)
-            return QHExit.OK
-        elif args['__qhaction'] == 'update':
-            if not check_running_as_user():
-                return QHExit.NOT_QH_USER 
-            logger.debug('update')
-            logger.debug("@@@ WIP")
-            return QHExit.KNOWN_ISSUE
-        elif args['__qhaction'] == 'destroy':
-            if not check_running_as_user():
-                return QHExit.NOT_QH_USER 
-            logger.debug('destroy')
-            params = self._parse_destroy(args)
-            self.destroy(params)
-            logger.debug("@@@ WIP")
-            return QHExit.KNOWN_ISSUE
-        else:
-            return QHExit.GENERAL_FAILURE
 
     def _parse_init(self, args: dict):
         init_params = args
