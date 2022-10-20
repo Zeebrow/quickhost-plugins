@@ -51,11 +51,11 @@ class SG(AWSResourceBase):
 #                logger.error(f"Unknown error caught while deleting user: {e}")
             logger.debug(f"Could not get sg for app '{self.app_name}':\n{e}")
             return 
-        if len(dsg['SecurityGroups']) > 1:
-            raise RuntimeError(f"More than 1 security group was found with the name '{self.app_name}': {sg['GroupId'] for sg in dsg['SecurityGroups']}")
-        elif len(dsg['SecurityGroups']) < 1:
-            logger.debug(f"No security groups found for app '{self.app_name}'")
-            return None
+        # if len(dsg['SecurityGroups']) > 1:
+        #     raise RuntimeError(f"More than 1 security group was found with the name '{self.app_name}': {sg['GroupId'] for sg in dsg['SecurityGroups']}")
+        # elif len(dsg['SecurityGroups']) < 1:
+        #     logger.debug(f"No security groups found for app '{self.app_name}'")
+        #     return None
 
     def create(self, cidrs, ports, dry_run=False) -> bool:
         rtn = True

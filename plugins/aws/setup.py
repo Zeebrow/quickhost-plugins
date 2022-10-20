@@ -14,6 +14,11 @@ setup(
     #depends_on=
     entry_points={
         # "group_name" : ["???"="name:function"]
-        "quickhost_plugin": ['quickhost_aws=quickhost_aws:load_plugin']
+        #"quickhost_plugin_apps": ['quickhost_aws_app=quickhost_aws:load_plugin'],
+        #"quickhost_plugin_parsers": ['quickhost_aws_parser=quickhost_aws:get_parser']
+        "quickhost_plugin": [
+            'aws_app=quickhost_aws:load_plugin',
+            'aws_parser=quickhost_aws:get_parser'
+        ],
     }
 )

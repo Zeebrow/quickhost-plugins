@@ -154,10 +154,11 @@ class AWSHost(AWSResourceBase):
         TODO: see source-aliases and make an Ubuntu option
         """
         response = self.client.describe_images(
+            # amzn2-ami-hvm-2.0.20211005.0-x86_64-gp2
             Filters=[
                 {
                     'Name': 'name',
-                    'Values': [ 'amzn2-ami-hvm-2.0.????????-x86_64-gp2', ]
+                    'Values': [ 'amzn2-ami-hvm-2.0.*-x86_64-gp2', ]
                 },
                 {
                     'Name': 'state',

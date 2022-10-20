@@ -1,3 +1,18 @@
+# Copyright (C) 2022 zeebrow
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 from typing import List, Tuple
 from dataclasses import dataclass
 from argparse import Namespace, SUPPRESS, ArgumentParser, _ArgumentGroup
@@ -39,10 +54,11 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
     """
     plugin_name = 'aws'
 
-    def __init__(self, app_name):
+    def __init__(self, app_name: str):
+        self.app_name = app_name
         self._client = boto3.client('ec2')
         self._ec2_resource = boto3.resource('ec2')
-        super().__init__('aws', app_name)
+        # super().__init__('aws', app_name)
         self.userdata = None
         self.ssh_key_filepath = None
         self.ami = None
@@ -77,60 +93,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         self.account = calling_user_arn.account
         return networking_params
 
-    def get_init_parser(self):
-        init_parser = ArgumentParser("AWS init", add_help=False)
-        #parser.add_argument("-y", "--answer-yes", required=False, action='store_true', help="bypass prompt to confirm you want to init.")
-        init_parser.add_argument("--profile", required=False, action='store', default=AWSConstants.DEFAULT_IAM_USER, help="profile of an admin AWS account used to create initial quickhost resources")
-        init_parser.add_argument(
-            "--region",
-            required=False,
-            action='store',
-            choices=AWSConstants.AVAILABLE_REGIONS,
-            default=AWSConstants.DEFAULT_REGION,
-            help="AWS region in which to create initial quickhost resources"
-        )
-        return init_parser
-
-    def get_make_parser(self):
-        """arguments for `make`"""
-        make_parser = ArgumentParser("AWS make", add_help=False)
-        make_parser.add_argument("--vpc-id", required=False, default=SUPPRESS, help="specify a VpcId to choose the vpc in which to launch hosts")
-        make_parser.add_argument("--subnet-id", required=False, default=SUPPRESS, help="specify a SubnetId to choose the subnet in which to launch hosts")
-        make_parser.add_argument("-c", "--host-count", required=False, default=1, help="number of hosts to create")
-        make_parser.add_argument("--ssh-key-filepath", required=False, default=SUPPRESS, help="download newly created key to target file (default is APP_NAME.pem in cwd)")
-        make_parser.add_argument("-y", "--dry-run", required=False, action='store_true', help="prevents any resource creation when set")
-        make_parser.add_argument("-p", "--port", required=False, type=int, action='append', default=SUPPRESS, help="add an open tcp port to security group, applied to all ips")
-        make_parser.add_argument("--ip", required=False, action='append', help="additional ipv4 to allow through security group. all ports specified with '--port' are applied to all ips specified with --ip if a cidr is not included, it is assumed to be /32")
-        make_parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
-        make_parser.add_argument("--ami", required=False, default=None, help="change the ami to launch, see source-aliases for getting lastest")
-        make_parser.add_argument("-u", "--userdata", required=False, default=None, help="path to optional userdata file")
-        make_parser.add_argument("--region", required=False, choices=AWSConstants.AVAILABLE_REGIONS, default=AWSConstants.DEFAULT_REGION, help="region to launch the host into.")
-        return make_parser
-
-    def get_describe_parser(self):
-        parser= ArgumentParser("AWS describe", add_help=False)
-        parser.add_argument("--region", required=False, choices=AWSConstants.AVAILABLE_REGIONS, default=AWSConstants.DEFAULT_REGION, help="region to launch the host into.")
-        return parser
-
-    def update_parser_arguments(self, parser: ArgumentParser):
-        parser.add_argument("-y", "--dry-run", required=False, action='store_true', help="prevents any resource creation when set")
-        parser.add_argument("-p", "--port", required=False, type=int, action='append', default=SUPPRESS, help="add an open tcp port to security group, applied to all ips")
-        parser.add_argument("--ip", required=False, action='append', help="additional ipv4 to allow through security group. all ports specified with '--port' are applied to all ips specified with --ip if a cidr is not included, it is assumed to be /32")
-        parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
-        parser.add_argument("--ami", required=False, default=None, help="change the ami to launch, see source-aliases for getting lastest")
-        parser.add_argument("-u", "--userdata", required=False, default=SUPPRESS, help="path to optional userdata file")
-        return None
-
-    def get_destroy_parser(self):
-        parser= ArgumentParser("AWS destroy", add_help=False)
-        parser.add_argument("-r", "--region", required=False, default=AWSConstants.DEFAULT_REGION, help="region to launch the host into.")
-        return parser
-
-    @classmethod
-    def parser_arguments(subparser: ArgumentParser) -> None:
-        """required cli arguments, as well as allowed overrides"""
-        pass
-    
     def run_init(self, args: dict) -> Tuple[QHExit, str, str]:
         """must be run as an admin-like user"""
         logger.debug('run init')
@@ -200,7 +162,18 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         return CliResponse(stdout, stderr, rc)
 
     def _parse_init(self, args: dict):
-        init_params = args
+        init_params = {}
+        for arg, val in args.items():
+            if arg.startswith("__"):
+                continue
+            if arg == "config_file":
+                # do nothing for now
+                continue
+            else:
+                init_params[arg] = val
+        
+        # print(init_params)
+        # exit(1)
         return init_params
     
     def _parse_make(self, args: dict):
