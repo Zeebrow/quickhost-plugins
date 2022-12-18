@@ -16,34 +16,25 @@ class AWSParser(ParserBase):
     def add_parser_arguments(self, action: str, parser: ArgumentParser, help: bool) -> None:
         if help:
             p = ArgumentParser(f"aws {action}")
-            match action:
-                case 'init':
-                    self.get_init_parser(parser=p)
-                case 'make':
-                    self.get_make_parser(parser=p)
-                case 'describe':
-                    self.get_describe_parser(parser=p)
-                case 'update':
-                    self.get_update_parser(parser=p)
-                case 'destroy':
-                    self.get_destroy_parser(parser=p)
+        else:
+            p = parser
+
+        match action:
+            case 'init':
+                self.get_init_parser(parser=p)
+            case 'make':
+                self.get_make_parser(parser=p)
+            case 'describe':
+                self.get_describe_parser(parser=p)
+            case 'update':
+                self.get_update_parser(parser=p)
+            case 'destroy':
+                self.get_destroy_parser(parser=p)
+        if help:
             p.print_help()
             exit(0)
 
         logger.debug(f"action is '{action}'")
-        if action == 'init':
-            self.get_init_parser(parser)
-        elif action == 'make':
-            self.get_make_parser(parser)
-        elif action == 'describe':
-            self.get_describe_parser(parser)
-        elif action == 'update':
-            pass
-        elif action == 'destroy':
-            self.get_destroy_parser(parser)
-        else:
-            logger.error(f"why did main.py not handle invalid actions?")
-            raise ValueError(f"(This is a bug with quickhost, not the plugin) No such action '{action}'.")
     
     def get_init_parser(self, parser: ArgumentParser):
         parser.add_argument("--profile", required=False, action='store', default=AWSConstants.DEFAULT_IAM_USER, help="profile of an admin AWS account used to create initial quickhost resources")
