@@ -12,9 +12,11 @@
 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+from pathlib import Path
+
+import click
 
 from quickhost import AppBase, APP_CONST as C
-from pathlib import Path
 
 """
 The null plugin is used to test the main app.
@@ -45,7 +47,7 @@ under certain conditions; type `show c' for details.
         """Account setup, networking, etc. required to use plugin"""
         pass
 
-    
+    @click.command()
     def create(self):
         """ Start hosts """
         pass

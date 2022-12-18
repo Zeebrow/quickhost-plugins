@@ -1,16 +1,35 @@
 import argparse
 import logging
 
+import click
+
 from quickhost import ParserBase
 
 logger = logging.getLogger(__name__)
 
 class NullParser(ParserBase):
-    def __init__(self) -> argparse.ArgumentParser:
+    def __init__(self):
         pass
 
-    def add_parser_arguments(self, action: str, parser: argparse.ArgumentParser) -> None:
+    def add_parser_arguments(self, action: str, parser: argparse.ArgumentParser, help: bool) -> None:
+        if help:
+            match action:
+                case 'init':
+                    pass
+                case 'make':
+                    print("""
+                    Help for make
+                    """)
+                case 'describe':
+                    pass
+                case 'update':
+                    pass
+                case 'destroy':
+                    pass
+            exit(0)
+
         logger.debug(f"action is '{action}'")
+        print(f"action is '{action}'")
         if action == 'init':
             parser.add_argument("--null-init-arg", action='store_true', help='set an init property of the null app')
         elif action == 'make':

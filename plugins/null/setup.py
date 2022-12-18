@@ -11,6 +11,9 @@ setup(
             'null_app=quickhost_null:load_plugin',
             'null_parser=quickhost_null:get_parser',
         ]
-    }
+    },
+    scripts=[
+        'scripts/quickhost-null.py'
+    ]
 
 )
