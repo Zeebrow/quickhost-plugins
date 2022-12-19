@@ -13,18 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import List, Tuple
+from typing import List
 from dataclasses import dataclass
-from argparse import Namespace, SUPPRESS, ArgumentParser, _ArgumentGroup
-from abc import ABCMeta, abstractmethod
-import configparser
 import logging
 import os
-import json
 from pathlib import Path
 
 import boto3
-from botocore.exceptions import ClientError
 
 import quickhost
 from quickhost import APP_CONST as QHC, QHExit, CliResponse
@@ -36,7 +31,7 @@ from .AWSHost import AWSHost
 from .AWSKeypair import KP
 from .AWSNetworking import AWSNetworking
 from .constants import AWSConstants
-from .utilities import check_running_as_user, get_ssh, QuickhostUnauthorized, Arn
+from .utilities import QuickhostUnauthorized, Arn
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +49,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
     """
     plugin_name = 'aws'
 
-    def __init__(self, app_name: str):
+    def __init__(self, app_name):
         self.app_name = app_name
         self._client = boto3.client('ec2')
         self._ec2_resource = boto3.resource('ec2')
@@ -93,73 +88,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         self.account = calling_user_arn.account
         return networking_params
 
-    def run_init(self, args: dict) -> Tuple[QHExit, str, str]:
-        """must be run as an admin-like user"""
-        logger.debug('run init')
-        stdout = ""
-        stderr = ""
-        rc = QHExit.GENERAL_FAILURE
-
-        try:
-            stdout, stderr, rc = self.plugin_init(args)
-        except QuickhostUnauthorized as e:
-            stderr = "Unauthorized: {}".format(e)
-            stderr += "\nTry specifiying a different user with --profile."
-            rc = QHExit.FAIL_AUTH
-        return CliResponse(stdout, stderr, rc)
-
-    def run_make(self, args: dict):
-        logger.debug('make')
-        stdout = ""
-        stderr = ""
-        rc = QHExit.GENERAL_FAILURE
-
-        prompt_continue = input("proceed? (y/n)")
-        if not prompt_continue == 'y':
-            stderr = "aborted"
-            return CliResponse(stdout, stderr, QHExit.ABORTED)
-
-        try:
-            params =  self._parse_make(args) # @@@@@@@@@@ shitshitshit
-            #stdout, stderr, rc = self.create(params) # @@@@@@@@@@ shitshitshit
-            stdout, stderr, rc = self.create(args) # @@@@@@@@@@ shitshitshit
-        except QuickhostUnauthorized as e:
-            stderr = "Unauthorized: {}".format(e)
-            stderr += "\nTry specifiying a different user with --profile."
-            rc = QHExit.FAIL_AUTH
-        return CliResponse(stdout, stderr, rc)
-
-    def run_describe(self, args: dict):
-        logger.debug('run describe')
-        stdout = ""
-        stderr = None
-        rc = QHExit.GENERAL_FAILURE
-
-        try:
-            stdout, stderr, rc = self.describe(args)
-        except QuickhostUnauthorized as e:
-            stderr = "Unauthorized: {}".format(e)
-            stderr += "\nTry specifiying a different user with --profile."
-            rc = QHExit.FAIL_AUTH
-        return CliResponse(stdout, stderr, rc)
-
-    def run_destroy(self, args: dict):
-        logger.debug('destroy')
-        stdout = ""
-        stderr = ""
-        rc = QHExit.GENERAL_FAILURE
-
-        prompt_continue = input("proceed? (y/n)")
-        if not prompt_continue == 'y':
-            print("aborted.")
-            rc = QHExit.ABORTED
-            return CliResponse(rc, stdout, stderr)
-        try:
-            stdout, stderr, rc = self.destroy(self._parse_destroy(args))
-        except QuickhostUnauthorized as e:
-            stderr = "Unauthorized: {}".format(e)
-            rc = QHExit.FAIL_AUTH
-        return CliResponse(stdout, stderr, rc)
 
     def _parse_init(self, args: dict):
         init_params = {}
@@ -175,7 +103,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         # print(init_params)
         # exit(1)
         return init_params
-    
     def _parse_make(self, args: dict):
         make_params = {}
         flags = args.keys()
@@ -243,12 +170,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         return make_params
 
 
-    def _parse_describe(self, args: dict) -> dict:
-        return args
-        
-    def _parse_destroy(self, args: dict):
-        return args
-
     def _print_loaded_args(self, d: dict, heading=None) -> None:
         """print the currently loaded app parameters"""
         underline_char = '*'
@@ -282,7 +203,13 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         - IAM user/group/policies/credentials
         - .aws/config and .aws/credentials files
         - VPC/Subnet/Routing/networking per-region
+        must be run as an admin-like user
         """
+        logger.debug('run init')
+        stdout = ""
+        stderr = ""
+        rc = QHExit.GENERAL_FAILURE
+
         params = self._parse_init(init_args)
         whoami, iam_client = self.get_client(resource='iam', **params)
 
@@ -317,6 +244,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     # @@@ CliResponse
     def describe(self, args: dict) -> CliResponse:
+        logger.debug('run describe')
         params = self._parse_describe(args)
         networking_params = self.load_default_config(
             region=params['region']
@@ -360,6 +288,26 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
     
     # @@@ CliResponse
     def create(self, args: dict) -> CliResponse:
+        # @@@ run_make
+        logger.debug('make')
+        stdout = ""
+        stderr = ""
+        rc = QHExit.GENERAL_FAILURE
+
+        prompt_continue = input("proceed? (y/n)")
+        if not prompt_continue == 'y':
+            stderr = "aborted"
+            return CliResponse(stdout, stderr, QHExit.ABORTED)
+
+        try:
+            params =  self._parse_make(args) # @@@@@@@@@@ shitshitshit
+            #stdout, stderr, rc = self.create(params) # @@@@@@@@@@ shitshitshit
+        except QuickhostUnauthorized as e:
+            stderr = "Unauthorized: {}".format(e)
+            stderr += "\nTry specifiying a different user with --profile."
+            rc = QHExit.FAIL_AUTH
+        # @@@ end run_make()
+
         params = self._parse_make(args)
         self.load_default_config(region=params['region'])
         profile = AWSConstants.DEFAULT_IAM_USER
@@ -404,23 +352,27 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         else:
             return CliResponse('finished creating hosts with warnings', f"{kp_created=}, {hosts_created=}, {sg_created=}", QHExit.GENERAL_FAILURE)
 
-    def update(self) -> CliResponse:
-        pass
+    def update(self, args: dict) -> CliResponse:
+        raise Exception("TODO")
 
     def destroy(self, args: dict) -> CliResponse:
+        prompt_continue = input("proceed? (y/n)")
+        if not prompt_continue == 'y':
+            print("aborted.")
+            rc = QHExit.ABORTED
+            return CliResponse(rc, "", "")
         self.load_default_config()
-        params = self._parse_destroy(args)
         kp_destroyed = KP(
             app_name=self.app_name,
-            region=params['region'],
+            region=args['region'],
         ).destroy()
         hosts = AWSHost(
-            region=params['region'],
+            region=args['region'],
             app_name=self.app_name,
         )
         hosts_destroyed = hosts.destroy()
         sg_destroyed = SG(
-            region=params['region'],
+            region=args['region'],
             app_name=self.app_name,
             vpc_id=self.vpc_id,
         ).destroy()
@@ -428,3 +380,33 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             return CliResponse('Done', '', QHExit.OK)
         else:
             return CliResponse('finished destroying hosts with errors', f"{kp_destroyed=}, {hosts_destroyed=}, {sg_destroyed=}", QHExit.GENERAL_FAILURE)
+
+#config_file: <_io.TextIOWrapper name='/home/zeebrow/.local/etc/quickhost.conf' mode='r' encoding='UTF-8'>
+#__help: False
+#main: aws
+#aws: make
+#host_count: 1
+#dry_run: False
+#ip: None
+#instance_type: t2.micro
+#ami: None
+#userdata: None
+#@pylance... region: us-east-1
+#app_name: asdf
+    
+    @dataclass
+    class MakeParams:
+        ports: List[int]
+        cidrs: List[str]
+        userdata: str
+        key_name: str
+        ssh_key_filepath: str 
+        dry_run: str
+        host_count: int
+        instance_type: str
+        ami: str
+        vpc_id: str
+        subnet_id: str
+        region: str
+
+

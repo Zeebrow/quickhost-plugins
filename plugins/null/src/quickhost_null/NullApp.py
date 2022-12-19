@@ -14,8 +14,6 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from pathlib import Path
 
-import click
-
 from quickhost import AppBase, APP_CONST as C
 
 """
@@ -23,7 +21,8 @@ The null plugin is used to test the main app.
 """
 
 class NullApp(AppBase):
-    def __init__(self, config_file=C.DEFAULT_CONFIG_FILEPATH):
+    def __init__(self, app_name, config_file=C.DEFAULT_CONFIG_FILEPATH):
+        self.app_name = app_name
         self.config_file = Path(config_file).absolute()
         if not self.config_file.exists():
             raise RuntimeError(f"no such file: {self.config_file}")
@@ -43,26 +42,30 @@ under certain conditions; type `show c' for details.
         pass
 
     
-    def plugin_init():
+    def plugin_init(self, args):
+        [print(f"{k}: {v}") for k,v in args.items()]
         """Account setup, networking, etc. required to use plugin"""
-        pass
+        return ("null", "null", "null")
 
-    @click.command()
-    def create(self):
+    def create(self, args):
+        [print(f"{k}: {v}") for k,v in args.items()]
         """ Start hosts """
-        pass
+        return ("null", "null", "null")
 
     
-    def describe(self) -> dict:
+    def describe(self, args) -> dict:
+        [print(f"{k}: {v}") for k,v in args.items()]
         """return information about hosts in the target app"""
-        pass
+        return ("null", "null", "null")
 
     
-    def update(self):
+    def update(self, args):
+        [print(f"{k}: {v}") for k,v in args.items()]
         """change the hosts in some way"""
-        pass
+        return ("null", "null", "null")
         
     
-    def destroy(self):
+    def destroy(self, args):
+        [print(f"{k}: {v}") for k,v in args.items()]
         """ delete all hosts associated with your app """
-        pass
+        return ("null", "null", "null")
