@@ -112,14 +112,19 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             _ports = list(dict.fromkeys(args['port']))
             ports = []
             for p in _ports:
-                # pretend they're all ints for now
                 try:
                     ports.append(str(p))
                 except ValueError:
                     raise RuntimeError("port numbers must be digits")
             make_params['ports'] = ports
+        # set defaults based on os
+        # NOTE: specifying a port on the command line will override defaults
+        # this is not documented, but is desired behavior
         else:
-            make_params['ports'] = QHC.DEFAULT_OPEN_PORTS
+            if args['os'] in AWSConstants.WindowsOSTypes:
+                make_params['ports'] = [3389]
+            else:
+                make_params['ports'] = [22]
         # cidrs ingress
         make_params['cidrs'] = []
         if args['ip'] is None:
