@@ -245,7 +245,8 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
     # @@@ CliResponse
     def describe(self, args: dict) -> CliResponse:
         logger.debug('run describe')
-        params = self._parse_describe(args)
+        # params = self._parse_describe(args)
+        params = args
         networking_params = self.load_default_config(
             region=params['region']
         )
