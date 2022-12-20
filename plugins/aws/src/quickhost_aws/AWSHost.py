@@ -33,15 +33,12 @@ class AWSHost(AWSResourceBase):
         self.app_name=app_name
         self.host_count = None
 
-    def create(self, num_hosts, instance_type, sgid, subnet_id, userdata, key_name, dry_run=False, image_id=AWSConstants.DEFAULT_HOST_OS):
+    def create(self, num_hosts, instance_type, sgid, subnet_id, userdata, key_name, os, dry_run=False):
+        image_id = self.get_latest_image(os)
         self.host_count = num_hosts
         if self.get_host_count() > 0:
             logger.error(f"Hosts for app '{self.app_name}' already exist")
             return False
-        if image_id is None:
-            print("No ami specified, getting latest al2...", end='')
-            image_id = self.get_latest_image()
-            print("Done. ({image_id})")
         print()
         print(f"starting hosts...")
         print( "*****************")
@@ -148,23 +145,32 @@ class AWSHost(AWSResourceBase):
             return None
         return instance_ids
 
-    def get_latest_image(self, os=QHC.DEFAULT_APP_NAME):
+
+    def get_latest_image(self, os='amazon-linux-2'):
         """
         Get the latest amazon linux 2 ami
         TODO: see source-aliases and make an Ubuntu option
+        NOTE: All EBS backed AMI's less than 10GB are free-tier (sic)
         """
+        filterset = [
+            _new_filter('state', 'available'),
+            _new_filter('architecture', 'x86_64'),
+        ]
+        match os:
+            case 'amazon-linux-2':
+                filterset.append(
+                    _new_filter('name', 'amzn2-ami-hvm-2.0.*-x86_64-gp2'),
+                )
+            case 'ubuntu':
+                filterset.append(
+                    _new_filter('name', '*ubuntu*22.04*'),
+                )
+            case _:
+                raise Exception(f"no such image type '{os}'")
+
+
         response = self.client.describe_images(
-            # amzn2-ami-hvm-2.0.20211005.0-x86_64-gp2
-            Filters=[
-                {
-                    'Name': 'name',
-                    'Values': [ 'amzn2-ami-hvm-2.0.*-x86_64-gp2', ]
-                },
-                {
-                    'Name': 'state',
-                    'Values': [ 'available', ]
-                },
-            ],
+            Filters=filterset,
             IncludeDeprecated=False,
             DryRun=False
         )
@@ -286,3 +292,11 @@ class AWSHost(AWSResourceBase):
             time.sleep(1)
         return False
 
+
+def _new_filter(name: str, values: list|str):
+    if (type(values) == type("")):
+        return {'Name': name, 'Values': [values]}
+    elif (type(values) == type([])):
+        return {'Name': name, 'Values': values}
+    else:
+        raise Exception(f"invalid type '{type(values)}' in filter expression")

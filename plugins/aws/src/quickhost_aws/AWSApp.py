@@ -112,7 +112,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             _ports = list(dict.fromkeys(args['port']))
             ports = []
             for p in _ports:
-                # pretend they're all inst for now
+                # pretend they're all ints for now
                 try:
                     ports.append(str(p))
                 except ValueError:
@@ -158,14 +158,14 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             make_params['host_count'] = args['host_count']
         if 'instance_type' in flags:
             make_params['instance_type'] = args['instance_type']
-        if 'ami' in flags:
-            make_params['ami'] = args['ami']
         if 'vpc_id' in flags:
             make_params['vpc_id'] = args['vpc_id']
         if 'subnet_id' in flags:
             make_params['subnet_id'] = args['subnet_id']
         if 'region' in flags:
             make_params['region'] = args['region']
+        if 'os' in flags:
+            make_params['os'] = args['os']
 
         return make_params
 
@@ -333,14 +333,10 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             ports=params['ports'],
             cidrs=params['cidrs'],
         )
-        if params['ami'] is None:
-            print("No ami specified, getting latest al2...", end='')
-            ami = host.get_latest_image()
-            print(f"done ({ami})")
         hosts_created = host.create(
             subnet_id=self.subnet_id,
             num_hosts=params['host_count'],
-            image_id=ami,
+            os=params['os'],
             instance_type=params['instance_type'],
             sgid=sg.sgid,
             key_name=params['key_name'],
@@ -381,33 +377,3 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             return CliResponse('Done', '', QHExit.OK)
         else:
             return CliResponse('finished destroying hosts with errors', f"{kp_destroyed=}, {hosts_destroyed=}, {sg_destroyed=}", QHExit.GENERAL_FAILURE)
-
-#config_file: <_io.TextIOWrapper name='/home/zeebrow/.local/etc/quickhost.conf' mode='r' encoding='UTF-8'>
-#__help: False
-#main: aws
-#aws: make
-#host_count: 1
-#dry_run: False
-#ip: None
-#instance_type: t2.micro
-#ami: None
-#userdata: None
-#@pylance... region: us-east-1
-#app_name: asdf
-    
-    @dataclass
-    class MakeParams:
-        ports: List[int]
-        cidrs: List[str]
-        userdata: str
-        key_name: str
-        ssh_key_filepath: str 
-        dry_run: str
-        host_count: int
-        instance_type: str
-        ami: str
-        vpc_id: str
-        subnet_id: str
-        region: str
-
-
