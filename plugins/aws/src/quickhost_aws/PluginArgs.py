@@ -80,9 +80,13 @@ class AWSParser(ParserBase):
         parser.add_argument("-p", "--port", required=False, type=int, action='append', default=SUPPRESS, help="add an open tcp port to security group, applied to all ips")
         parser.add_argument("--ip", required=False, action='append', help="additional ipv4 to allow through security group. all ports specified with '--port' are applied to all ips specified with --ip if a cidr is not included, it is assumed to be /32")
         parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
-        parser.add_argument("--ami", required=False, default=None, help="change the ami to launch, see source-aliases for getting lastest")
         parser.add_argument("-u", "--userdata", required=False, default=None, help="path to optional userdata file")
         parser.add_argument("--region", required=False, choices=AWSConstants.AVAILABLE_REGIONS, default=AWSConstants.DEFAULT_REGION, help="region to launch the host into.")
+        parser.add_argument("--os", required=False, default='amazon-linux-2', help="the OS to run on the host",
+            choices=[
+            "amazon-linux-2"
+            "ubuntu"
+            ])
 
     def add_describe_parser_arguments(self, parser: ArgumentParser):
         parser.add_argument("-n", "--app-name", required=True, default=SUPPRESS, help="name of the app")
