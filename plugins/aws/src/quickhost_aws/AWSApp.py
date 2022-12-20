@@ -13,8 +13,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import List
-from dataclasses import dataclass
 import logging
 import os
 from pathlib import Path
@@ -22,7 +20,7 @@ from pathlib import Path
 import boto3
 
 import quickhost
-from quickhost import APP_CONST as QHC, QHExit, CliResponse
+from quickhost import QHExit, CliResponse
 
 from .AWSResource import AWSResourceBase
 from .AWSIam import Iam
@@ -87,96 +85,11 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         self.user = calling_user_arn.resource
         self.account = calling_user_arn.account
         return networking_params
-
-
-    def _parse_init(self, args: dict):
-        init_params = {}
-        for arg, val in args.items():
-            if arg.startswith("__"):
-                continue
-            if arg == "config_file":
-                # do nothing for now
-                continue
-            else:
-                init_params[arg] = val
-        
-        # print(init_params)
-        # exit(1)
-        return init_params
-    def _parse_make(self, args: dict):
-        make_params = {}
-        flags = args.keys()
-        # ports ingress
-        if 'port' in flags:
-            # get rid of duplicates
-            _ports = list(dict.fromkeys(args['port']))
-            ports = []
-            for p in _ports:
-                try:
-                    ports.append(str(p))
-                except ValueError:
-                    raise RuntimeError("port numbers must be digits")
-            make_params['ports'] = ports
-        # set defaults based on os
-        # NOTE: specifying a port on the command line will override defaults
-        # this is not documented, but is desired behavior
-        else:
-            if args['os'] in AWSConstants.WindowsOSTypes:
-                make_params['ports'] = [3389]
-            else:
-                make_params['ports'] = [22]
-        # cidrs ingress
-        make_params['cidrs'] = []
-        if args['ip'] is None:
-            make_params['cidrs'].append(quickhost.get_my_public_ip())
-        else:
-            for i in args['ip']:
-                if len(i.split('/')) == 1:
-                    logger.warning(f"Assuming /32 cidr for ip '{i}'")
-                    make_params['cidrs'].append(i + "/32")
-                else:
-                    make_params['cidrs'].append(i)
-        # userdata
-        if args['userdata'] is not None:
-            if not Path(args['userdata']).exists():
-                raise RuntimeError(f"path to userdata '{args['userdata']}' does not exist!")
-        make_params['userdata'] = args['userdata']
-
-
-        # ec2 key name
-        if 'key_name' in flags:
-            make_params['key_name'] = args['key_name']
-        else:
-            make_params['key_name'] = self.app_name
-
-        # ec2 key pem file
-        if 'ssh_key_filepath' in flags:
-            make_params['ssh_key_filepath'] = args['ssh_key_filepath']
-        else:
-            make_params['ssh_key_filepath'] = f"{self.app_name}.pem"
-
-        # the rest 
-        # setdefault()
-        if 'dry_run' in flags:
-            make_params['dry_run'] = args['dry_run']
-        if 'host_count' in flags:
-            make_params['host_count'] = args['host_count']
-        if 'instance_type' in flags:
-            make_params['instance_type'] = args['instance_type']
-        if 'vpc_id' in flags:
-            make_params['vpc_id'] = args['vpc_id']
-        if 'subnet_id' in flags:
-            make_params['subnet_id'] = args['subnet_id']
-        if 'region' in flags:
-            make_params['region'] = args['region']
-        if 'os' in flags:
-            make_params['os'] = args['os']
-
-        return make_params
-
-
     def _print_loaded_args(self, d: dict, heading=None) -> None:
-        """print the currently loaded app parameters"""
+        """ Wow this is bad.  """
+        if d is None:
+            logger.warning("No items to print!")
+            return
         underline_char = '*'
         fill_char = '.'
         if heading:
@@ -193,13 +106,18 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
                 if not k.startswith("_"):
                     if heading:
                         k = underline_char + k
-                    print("{0:{fc}{align}{width}}{1}".format(
+                    print("{0:{fc}{align}{width}} {1}".format(
                         k, v, fc=fill_char, align='<', width=termwidth
                     ))
-            
         else:
             logger.warning("There's nowhere to show your results!")
         return None
+
+    def plugin_destroy(self, init_args: dict) -> CliResponse:
+        """
+        Needs a list-all-apps or something similar (which I want, anyways)
+        """
+        raise Exception("TODO")
 
     # @@@ CliResponse
     def plugin_init(self, init_args: dict) -> CliResponse:
@@ -211,51 +129,48 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         must be run as an admin-like user
         """
         logger.debug('run init')
-        stdout = ""
-        stderr = ""
-        rc = QHExit.GENERAL_FAILURE
-
-        params = self._parse_init(init_args)
-        whoami, iam_client = self.get_client(resource='iam', **params)
-
-        user_arn = whoami['Arn']
-        user_name = user_arn.split(":")[5].split("/")[-1]
+        finished_with_errors = False
+        params = {
+            "region": init_args['region'],
+            "profile": init_args['profile'],
+        }
+        whoami, _ = self.get_client(resource='iam', **params)
+        user_name = whoami['Arn'].split(":")[5].split("/")[-1]
         user_id = whoami['UserId']
         account = whoami['Account']
-        
-        inp = input(f"About to initialize quickhost using:\nuser:\t\t{user_name} ({user_id})\naccount:\t{account}\n\nContinue? (y/n)")
+        inp = input(f"About to initialize quickhost using:\nuser:\t\t{user_name} ({user_id})\naccount:\t{account}\n\nContinue? (y/n) ")
         if not inp.lower() == ('y' or 'yes'):
             return CliResponse(None, 'aborted', QHExit.ABORTED)
         qh_iam = Iam(**params)
-        #print(json.dumps(qh_iam.describe(), indent=2))
-        #qh_iam.destroy()
-        qh_iam.create()
-        #qh_iam.describe()
-        #print(json.dumps(qh_iam.describe(), indent=2))
+        try:
+            qh_iam.create()
+        except QuickhostUnauthorized as e:
+            finished_with_errors = True
+            logger.error(f"Failed to create initial IAM resources: {e}")
+
         networking_params= AWSNetworking(
             app_name=self.app_name,
-            **params
+            profile=init_args['profile'],
+            region=init_args['region'],
         )
-        #print(json.dumps(networking_params.describe(), indent=2))
-        #p = networking_params.destroy()
-        p = networking_params.create()
-        #p = networking_params.get()
-        #print(p)
-        #print(json.dumps(networking_params.describe(), indent=2))
-        if True: #@@@
-            return CliResponse('Done', None, QHExit.OK)
-        else:
+        try: 
+            networking_params.create()
+        except Exception:
+            finished_with_errors = True
+            logger.error("huh. I didn't know networking threw exceptions.")
+
+        if finished_with_errors: #@@@
             return CliResponse('finished init with errors', "<placeholder>", QHExit.GENERAL_FAILURE)
+        else:
+            return CliResponse('Done', None, QHExit.OK)
 
     # @@@ CliResponse
     def describe(self, args: dict) -> CliResponse:
         logger.debug('run describe')
-        # params = self._parse_describe(args)
         params = args
         networking_params = self.load_default_config(
             region=params['region']
         )
-
         iam_vals = Iam(
             region=params['region'],
         ).describe(verbiage=1)
@@ -285,12 +200,15 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         self._print_loaded_args(iam_vals)
         self._print_loaded_args(sg_describe)
         self._print_loaded_args(kp_describe)
-        for i,host in enumerate(hosts_describe):
-            self._print_loaded_args(host, heading=f"host {i}")
+        if hosts_describe is None:
+            logger.warning("No hosts found for app " + self.app_name)
+        else:
+            for i,host in enumerate(hosts_describe):
+                self._print_loaded_args(host, heading=f"host {i}")
         if kp_describe and hosts_describe and sg_describe:
             return CliResponse('Done', None, QHExit.OK)
         else:
-            return CliResponse('finished creating hosts with errors', f"{kp_describe=}, {hosts_describe=}, {sg_describe=}", QHExit.GENERAL_FAILURE)
+            return CliResponse('finished creating hosts with errors', "<placeholder>", 1)
     
     # @@@ CliResponse
     def create(self, args: dict) -> CliResponse:
@@ -299,12 +217,10 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         stdout = ""
         stderr = ""
         rc = QHExit.GENERAL_FAILURE
-
         prompt_continue = input("proceed? (y/n)")
         if not prompt_continue == 'y':
             stderr = "aborted"
             return CliResponse(stdout, stderr, QHExit.ABORTED)
-
         try:
             params =  self._parse_make(args) # @@@@@@@@@@ shitshitshit
             #stdout, stderr, rc = self.create(params) # @@@@@@@@@@ shitshitshit
@@ -313,7 +229,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             stderr += "\nTry specifiying a different user with --profile."
             rc = QHExit.FAIL_AUTH
         # @@@ end run_make()
-
         params = self._parse_make(args)
         self.load_default_config(region=params['region'])
         profile = AWSConstants.DEFAULT_IAM_USER
@@ -382,3 +297,68 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             return CliResponse('Done', '', QHExit.OK)
         else:
             return CliResponse('finished destroying hosts with errors', f"{kp_destroyed=}, {hosts_destroyed=}, {sg_destroyed=}", QHExit.GENERAL_FAILURE)
+
+    def _parse_make(self, args: dict):
+        make_params = {}
+        flags = args.keys()
+        # ports ingress
+        if 'port' in flags:
+            # get rid of duplicates
+            _ports = list(dict.fromkeys(args['port']))
+            ports = []
+            for p in _ports:
+                try:
+                    ports.append(str(p))
+                except ValueError:
+                    raise RuntimeError("port numbers must be digits")
+            make_params['ports'] = ports
+        # set defaults based on os
+        # NOTE: specifying a port on the command line will override defaults
+        # this is not documented, but is desired behavior
+        else:
+            if args['os'] in AWSConstants.WindowsOSTypes:
+                make_params['ports'] = [3389]
+            else:
+                make_params['ports'] = [22]
+        # cidrs ingress
+        make_params['cidrs'] = []
+        if args['ip'] is None:
+            make_params['cidrs'].append(quickhost.get_my_public_ip())
+        else:
+            for i in args['ip']:
+                if len(i.split('/')) == 1:
+                    logger.warning(f"Assuming /32 cidr for ip '{i}'")
+                    make_params['cidrs'].append(i + "/32")
+                else:
+                    make_params['cidrs'].append(i)
+        # userdata
+        if args['userdata'] is not None:
+            if not Path(args['userdata']).exists():
+                raise RuntimeError(f"path to userdata '{args['userdata']}' does not exist!")
+        make_params['userdata'] = args['userdata']
+        # ec2 key name
+        if 'key_name' in flags:
+            make_params['key_name'] = args['key_name']
+        else:
+            make_params['key_name'] = self.app_name
+        # ec2 key pem file
+        if 'ssh_key_filepath' in flags:
+            make_params['ssh_key_filepath'] = args['ssh_key_filepath']
+        else:
+            make_params['ssh_key_filepath'] = f"{self.app_name}.pem"
+        # the rest 
+        if 'dry_run' in flags:
+            make_params['dry_run'] = args['dry_run']
+        if 'host_count' in flags:
+            make_params['host_count'] = args['host_count']
+        if 'instance_type' in flags:
+            make_params['instance_type'] = args['instance_type']
+        if 'vpc_id' in flags:
+            make_params['vpc_id'] = args['vpc_id']
+        if 'subnet_id' in flags:
+            make_params['subnet_id'] = args['subnet_id']
+        if 'region' in flags:
+            make_params['region'] = args['region']
+        if 'os' in flags:
+            make_params['os'] = args['os']
+        return make_params

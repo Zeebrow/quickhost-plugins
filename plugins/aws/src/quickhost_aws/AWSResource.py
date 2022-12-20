@@ -1,7 +1,6 @@
 import logging
 
 import boto3
-from botocore.config import Config
 
 from .constants import AWSConstants
 

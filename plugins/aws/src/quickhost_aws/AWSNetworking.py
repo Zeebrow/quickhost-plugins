@@ -40,7 +40,6 @@ class AWSNetworking(AWSResourceBase):
         vpc = None 
         if not self.vpc_id:
             logger.debug("creating vpc...")
-
             vpc = self.ec2.create_vpc(
                 CidrBlock=cidr_block,
                 DryRun=self.dry_run,
@@ -50,16 +49,16 @@ class AWSNetworking(AWSResourceBase):
             vpc.create_tags(Tags=[AWSNetworking.DefaultTag])
             self.vpc_id = vpc.id
             vpc.reload()
-            logger.debug(f"Done. {self.vpc_id=}")
+            logger.info(f"Created VPC: {self.vpc_id}")
         else:
-            logger.debug(f"Found existing vpc: {self.vpc_id}")
+            logger.warning(f"Found existing vpc: {self.vpc_id}")
             vpc = self.ec2.Vpc(self.vpc_id)
 
         ####################################################
         # igw
         ####################################################
         igw = None
-        igw_ok = 'Not OK'
+        igw_status = 'Not OK'
         if not self.igw_id:
             logger.debug("creating igw...")
             igw_id = self.client.create_internet_gateway(
@@ -71,17 +70,18 @@ class AWSNetworking(AWSResourceBase):
             logger.debug(f"...attaching igw ({self.igw_id}) to vpc ({self.vpc_id})...")
             igw.attach_to_vpc(DryRun=False, VpcId=self.vpc_id)
             igw.reload()
-            logger.debug(f"Done. {self.igw_id=}")
+            logger.info(f"Created Internet Gateway: {self.igw_id}")
         else:
-            igw_ok = 'Check attachment'
+            logger.debug(f"Have igw: {self.igw_id}")
+            igw_status = 'Check attachment'
             igw = self.ec2.InternetGateway(self.igw_id)
-            # Do we want to 'fix' the attachment?
+            # fixes attachment issue
             if len(igw.attachments) == 0:
                 igw.attach_to_vpc(DryRun=False, VpcId=self.vpc_id)
                 igw.reload()
             if len(igw.attachments) == 1 and igw.attachments[0]['VpcId'] == self.vpc_id:
-                igw_ok = f"Attached to vpc {self.vpc_id}"
-            logger.debug(f"Found existing internet gateway with id: {self.igw_id} ({igw_ok})")
+                igw_status = f"Attached to vpc {self.vpc_id}"
+            logger.warning(f"Found existing internet gateway with id: {self.igw_id} ({igw_status})")
 
         ####################################################
         # subnet
@@ -98,9 +98,9 @@ class AWSNetworking(AWSResourceBase):
             subnet.create_tags(Tags=[AWSNetworking.DefaultTag])
             self.subnet_id = subnet.id
             subnet.reload()
-            logger.debug(f"Done. {self.subnet_id=}")
+            logger.info(f"Created subnet: {self.subnet_id}")
         else:
-            logger.debug(f"Found existing subnet: {self.subnet_id}")
+            logger.warning(f"Found existing subnet: {self.subnet_id}")
             subnet = self.ec2.Subnet(self.subnet_id)
 
         ####################################################
@@ -133,7 +133,7 @@ class AWSNetworking(AWSResourceBase):
             route_table.reload()
             if route_table.associations_attribute[0]['SubnetId']  == self.subnet_id and route_table.associations_attribute[0]['AssociationState']['State'] == "associated":
                 rt_ok = f"Associated with subnet {self.subnet_id}"
-            logger.debug(f"Done. {self.rt_id=} ({rt_ok})")
+            logger.info(f"Created Route Table. {self.rt_id=} ({rt_ok})")
         else:
             rt_ok = 'Check association'
             route_table = self.ec2.RouteTable(self.rt_id)
@@ -146,8 +146,14 @@ class AWSNetworking(AWSResourceBase):
                 rt_ok = 'ok'
             if route_table.associations_attribute[0]['SubnetId']  == self.subnet_id and route_table.associations_attribute[0]['AssociationState']['State'] == "associated":
                 rt_ok = f"Associated with subnet {self.subnet_id}"
-            logger.debug(f"Found existing route table: {self.rt_id} ({rt_ok})")
-        rt = self.ec2.RouteTable(self.rt_id)
+            logger.warning(f"Found existing route table: {self.rt_id} ({rt_ok})")
+        # rt = self.ec2.RouteTable(self.rt_id)
+        return {
+            "vpc_id": self.vpc_id,
+            "subnet_id": self.subnet_id,
+            "rt_id": self.rt_id,
+            "igw_id": self.igw_id,
+        }
 
     @quickmemo
     def describe(self, use_cache=True):
@@ -157,7 +163,6 @@ class AWSNetworking(AWSResourceBase):
             # these are special because they are called for all actions
             existing_vpcs = self.client.describe_vpcs( Filters=[ AWSNetworking.DefaultFilter ],)
             vpc_id = get_single_result_id("Vpc", existing_vpcs)
-
             existing_subnets = self.client.describe_subnets( Filters=[ AWSNetworking.DefaultFilter ],)
             subnet_id = get_single_result_id("Subnet",existing_subnets)
             store_test_data(resource='AWSNetworking', action='describe_vpcs', response_data=scrub_datetime(existing_vpcs))
@@ -167,10 +172,8 @@ class AWSNetworking(AWSResourceBase):
             if code == 'UnauthorizedOperation' or code == 'AccessDenied':
                 logger.critical(f"The user {self.caller_info['username']} couldn't perform the operation '{e.operation_name}'.")
                 raise QuickhostUnauthorized(username=self.caller_info['username'], operation=e.operation_name) 
-
         existing_igws = self.client.describe_internet_gateways( Filters=[ AWSNetworking.DefaultFilter ],)
         igw_id = get_single_result_id("InternetGateway",existing_igws)
-
         if igw_id is not None:
             igw = self.ec2.InternetGateway(igw_id)
             if igw.attachments == []:
@@ -178,8 +181,6 @@ class AWSNetworking(AWSResourceBase):
             else:
                 if igw.attachments[0]['VpcId'] != vpc_id:
                     logger.error(f"Internet Gateway '{igw_id}' is not attached to the correct vpc!")
-
-
         existing_rts = self.client.describe_route_tables( Filters=[ AWSNetworking.DefaultFilter ],)
         rt_id = get_single_result_id("RouteTable",existing_rts)
         store_test_data(resource='AWSNetworking', action='describe_route_tables', response_data=scrub_datetime(existing_rts))
