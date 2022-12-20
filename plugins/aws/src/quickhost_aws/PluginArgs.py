@@ -77,15 +77,17 @@ class AWSParser(ParserBase):
         parser.add_argument("-c", "--host-count", required=False, default=1, help="number of hosts to create")
         parser.add_argument("--ssh-key-filepath", required=False, default=SUPPRESS, help="download newly created key to target file (default is APP_NAME.pem in cwd)")
         parser.add_argument("-y", "--dry-run", required=False, action='store_true', help="prevents any resource creation when set")
-        parser.add_argument("-p", "--port", required=False, type=int, action='append', default=SUPPRESS, help="add an open tcp port to security group, applied to all ips")
+        parser.add_argument("-p", "--port", required=False, type=int, action='append', default=SUPPRESS, help="add an open tcp port to security group, applied to all ips (*nix default is 22, Windows 3389)")
         parser.add_argument("--ip", required=False, action='append', help="additional ipv4 to allow through security group. all ports specified with '--port' are applied to all ips specified with --ip if a cidr is not included, it is assumed to be /32")
         parser.add_argument("--instance-type", required=False, default="t2.micro", help="change the type of instance to launch")
         parser.add_argument("-u", "--userdata", required=False, default=None, help="path to optional userdata file")
         parser.add_argument("--region", required=False, choices=AWSConstants.AVAILABLE_REGIONS, default=AWSConstants.DEFAULT_REGION, help="region to launch the host into.")
-        parser.add_argument("--os", required=False, default='amazon-linux-2', help="the OS to run on the host",
+        parser.add_argument("--os", required=False, default='amazon-linux-2', help="the OS to run on the host ('-core' means no GUI)",
             choices=[
-            "amazon-linux-2"
-            "ubuntu"
+            "amazon-linux-2",
+            "ubuntu",
+            "windows",
+            "windows-core",
             ])
 
     def add_describe_parser_arguments(self, parser: ArgumentParser):

@@ -114,7 +114,6 @@ class AWSHost(AWSResourceBase):
         except ClientError as e:
             logger.error(e)
             return False
-
         return self.wait_for_hosts_to_terminate(tgt_instances=tgt_instances)
 
     def get_instance_ids(self, *states): #state_list=[AWSHostState.running]) -> List[str]:
@@ -145,12 +144,10 @@ class AWSHost(AWSResourceBase):
             return None
         return instance_ids
 
-
     def get_latest_image(self, os='amazon-linux-2'):
         """
-        Get the latest amazon linux 2 ami
-        TODO: see source-aliases and make an Ubuntu option
-        NOTE: All EBS backed AMI's less than 10GB are free-tier (sic)
+        NOTE: (us-east-1, 12/19/2022) Free tier eligible customers can get up to 30 GB of 
+        EBS General Purpose (SSD) or Magnetic storage
         """
         filterset = [
             _new_filter('state', 'available'),
@@ -158,17 +155,15 @@ class AWSHost(AWSResourceBase):
         ]
         match os:
             case 'amazon-linux-2':
-                filterset.append(
-                    _new_filter('name', 'amzn2-ami-hvm-2.0.*-x86_64-gp2'),
-                )
+                filterset.append(_new_filter('name', 'amzn2-ami-hvm-2.0.*-x86_64-gp2'),)
             case 'ubuntu':
-                filterset.append(
-                    _new_filter('name', '*ubuntu*22.04*'),
-                )
+                filterset.append(_new_filter('name', '*ubuntu*22.04*'),)
+            case 'windows':
+                filterset.append(_new_filter('name', 'Windows_Server-2022-English-Full-Base*'),)
+            case 'windows-core':
+                filterset.append(_new_filter('name', 'Windows_Server-2022-English-Core-Base*'),)
             case _:
                 raise Exception(f"no such image type '{os}'")
-
-
         response = self.client.describe_images(
             Filters=filterset,
             IncludeDeprecated=False,
@@ -291,7 +286,6 @@ class AWSHost(AWSResourceBase):
                 return True
             time.sleep(1)
         return False
-
 
 def _new_filter(name: str, values: list|str):
     if (type(values) == type("")):
