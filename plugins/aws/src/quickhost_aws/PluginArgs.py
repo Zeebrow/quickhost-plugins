@@ -24,6 +24,7 @@ class AWSParser(ParserBase):
         describe_parser = subp.add_parser("describe")
         update_parser = subp.add_parser("update")
         destroy_parser = subp.add_parser("destroy")
+        list_all_parser = subp.add_parser("list-all")
         self.add_init_parser_arguments(init_parser)
         self.add_make_parser_arguments(make_parser)
         self.add_describe_parser_arguments(describe_parser)

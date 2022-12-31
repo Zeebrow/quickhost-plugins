@@ -33,29 +33,6 @@ class AWSHostConfig:
     region: Region
     host_count: int
 
-class HostState:
-    running = 'running'
-    pending = 'pending' 
-    shutting_down = 'shutting-down' 
-    terminated = 'terminated' 
-    stopping = 'stopping' 
-    stopped = 'stopped' 
-    @classmethod
-    def allofem(self):
-        return [
-            "running",
-            "pending",
-            "shutting_down",
-            "terminated",
-            "stopping",
-            "stopped",
-        ]
-    @classmethod
-    def butnot(self,*states):
-        rtn = list(HostState.allofem())
-        [rtn.remove(i) for i in states]
-        return rtn
-
 @dataclass
 class AWSSgConfig:
     app_name: str

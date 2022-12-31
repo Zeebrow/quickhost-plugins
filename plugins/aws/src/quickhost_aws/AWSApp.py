@@ -16,6 +16,7 @@
 import logging
 import os
 from pathlib import Path
+import json
 
 import boto3
 
@@ -190,6 +191,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             region=params['region']
         )
         hosts_describe = hosts.describe()
+        logger.debug(hosts_describe)
         caller_info = {
             'account': self.account,
             'invoking user': '/'.join(self.user.split('/')[1:])
@@ -209,7 +211,16 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             return CliResponse('Done', None, QHExit.OK)
         else:
             return CliResponse('finished creating hosts with errors', "<placeholder>", 1)
-    
+
+    #@@@
+    @classmethod
+    def list_all(self):
+        print(json.dumps({
+            "hosts": AWSHost.get_all_running_apps(),
+            #...
+        }, indent=3))
+        return CliResponse('Done', None, QHExit.OK)
+
     # @@@ CliResponse
     def create(self, args: dict) -> CliResponse:
         # @@@ run_make
@@ -221,33 +232,17 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         if not prompt_continue == 'y':
             stderr = "aborted"
             return CliResponse(stdout, stderr, QHExit.ABORTED)
-        try:
-            params =  self._parse_make(args) # @@@@@@@@@@ shitshitshit
-            #stdout, stderr, rc = self.create(params) # @@@@@@@@@@ shitshitshit
-        except QuickhostUnauthorized as e:
-            stderr = "Unauthorized: {}".format(e)
-            stderr += "\nTry specifiying a different user with --profile."
-            rc = QHExit.FAIL_AUTH
-        # @@@ end run_make()
         params = self._parse_make(args)
+
         self.load_default_config(region=params['region'])
         profile = AWSConstants.DEFAULT_IAM_USER
-        kp = KP(
-            app_name=self.app_name,
-            region=params['region'],
-            profile=profile
-        )
-        sg = SG(
-            app_name=self.app_name,
-            region=params['region'],
-            profile=profile,
-            vpc_id=self.vpc_id,
-        )
-        host = AWSHost(
-            app_name=self.app_name,
-            region=params['region'],
-            profile=profile
-        )
+        kp = KP(app_name=self.app_name, region=params['region'], profile=profile)
+        sg = SG(app_name=self.app_name, region=params['region'], profile=profile, vpc_id=self.vpc_id)
+        host = AWSHost(app_name=self.app_name, region=params['region'], profile=profile)
+        if host.describe() is not None:
+            logger.error(f"app named '{self.app_name}' already exists")
+            return CliResponse(None, f"app named '{self.app_name}' already exists", QHExit.ABORTED)
+            
         kp_created = kp.create()
         sg_created = sg.create(
             ports=params['ports'],
@@ -256,14 +251,13 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         hosts_created = host.create(
             subnet_id=self.subnet_id,
             num_hosts=params['host_count'],
-            os=params['os'],
+            _os=params['os'],
             instance_type=params['instance_type'],
             sgid=sg.sgid,
             key_name=params['key_name'],
             userdata=params['userdata'],
             dry_run=params['dry_run']
         )
-        #_host.get_ssh()
         if kp_created and hosts_created and sg_created:
             return CliResponse( 'Done', None, QHExit.OK)
         else:
@@ -350,7 +344,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         if 'dry_run' in flags:
             make_params['dry_run'] = args['dry_run']
         if 'host_count' in flags:
-            make_params['host_count'] = args['host_count']
+            make_params['host_count'] = int(args['host_count'])
         if 'instance_type' in flags:
             make_params['instance_type'] = args['instance_type']
         if 'vpc_id' in flags:

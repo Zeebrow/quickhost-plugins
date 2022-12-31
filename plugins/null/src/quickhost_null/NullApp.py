@@ -69,3 +69,7 @@ under certain conditions; type `show c' for details.
         [print(f"{k}: {v}") for k,v in args.items()]
         """ delete all hosts associated with your app """
         return ("null", "null", "null")
+    
+    @classmethod
+    def list_all():
+        return ("null", "null", "null")
