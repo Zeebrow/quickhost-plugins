@@ -3,6 +3,8 @@ import time
 import logging
 import json
 from datetime import datetime
+from copy import copy
+from collections import defaultdict
 
 import boto3
 from botocore.exceptions import ClientError
@@ -74,7 +76,8 @@ class AWSHost(AWSResourceBase):
         store_test_data(resource='AWSHost', action='create', response_data=r_cleaned)
         self.wait_for_hosts_to_start(num_hosts)
         ssh_strings = []
-        for inst in self._get_app_instances():
+        app_insts_thingy = self._get_app_instances()
+        for inst in app_insts_thingy:
             logger.debug(f"match {_os}") 
             match _os:
                 case "ubuntu":
@@ -86,7 +89,7 @@ class AWSHost(AWSResourceBase):
                 case "windows-core":
                         ssh_strings.append(f"*{inst['public_ip']}")
                 case _:
-                    logger.warning(f"{_os} not heckin valid") 
+                    logger.warning(f"invalid os '{_os}'") 
         [ print(f"host {i}) {ssh}") for i,ssh in enumerate(ssh_strings) ]
         return True
 
@@ -133,8 +136,8 @@ class AWSHost(AWSResourceBase):
     
     @classmethod
     def get_all_running_apps(self) -> List[Any] | None:
-        dummy_awshost_instance = AWSHost('heres_your_problem').get_client("ec2")[1] #@@@@
-        all_running_hosts = dummy_awshost_instance.describe_instances( 
+        dummy_awshost_instance_client = AWSHost('heres_your_problem').get_client("ec2")[1] #@@@@
+        all_running_hosts = dummy_awshost_instance_client.describe_instances( 
             Filters=[
                 { 'Name': f"tag-key", 'Values': [QHC.DEFAULT_APP_NAME] },
                 { 'Name': 'instance-state-name', 'Values': ['running']},
@@ -148,10 +151,21 @@ class AWSHost(AWSResourceBase):
                 for t in host['Tags']:
                     if t['Key'] == 'Name':
                         app_names.append(t['Value'])
+
+        
         if len(app_names) == 0:
             return None
         else:
-            return app_names
+            app_name_count = defaultdict(int)
+            for app_name in app_names:
+                app_name_count[app_name] += 1
+            _rtn = []
+            for k,v in app_name_count.items():
+                if v >1:
+                    _rtn.append("{} ({})".format(k, v))
+                else:
+                    _rtn.append(k)
+            return _rtn 
 
     def _get_app_instances(self) -> List[Any] | None:
         app_instances = []
