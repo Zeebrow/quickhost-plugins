@@ -212,14 +212,30 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         else:
             return CliResponse('finished creating hosts with errors', "<placeholder>", 1)
 
-    #@@@
+    #@@@ need to get regions...
     @classmethod
     def list_all(self):
-        print(json.dumps({
-            "hosts": AWSHost.get_all_running_apps(),
+        return CliResponse(json.dumps({
+            "apps": AWSHost.get_all_running_apps(),
             #...
-        }, indent=3))
-        return CliResponse('Done', None, QHExit.OK)
+        }, indent=3), None, QHExit.OK)
+
+    @classmethod
+    def destroy_all(self):
+        apps = AWSHost.get_all_running_apps()
+        if apps is None:
+            return CliResponse("Nothing to destroy.", None, QHExit.OK)
+        logger.info("Destroying {} apps".format(len(apps)))
+        for a in apps:
+            app = AWSApp(a.split(" ")[0])
+            app.destroy(args={
+                "h": False,
+                "region": "us-east-1", #@@@ need to get region from AWSApp.list_all
+                "yes": True
+            })
+            logger.info("Destroyed app '{}'".format(app.app_name))
+
+        return CliResponse("Destroyed {} apps".format(len(apps)), None, QHExit.OK)
 
     # @@@ CliResponse
     def create(self, args: dict) -> CliResponse:
@@ -267,11 +283,12 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         raise Exception("TODO")
 
     def destroy(self, args: dict) -> CliResponse:
-        prompt_continue = input("proceed? (y/n)")
-        if not prompt_continue == 'y':
-            print("aborted.")
-            rc = QHExit.ABORTED
-            return CliResponse(rc, "", "")
+        if 'yes' not in args.keys():
+            prompt_continue = input("proceed? (y/n)")
+            if not prompt_continue == 'y':
+                print("aborted.")
+                rc = QHExit.ABORTED
+                return CliResponse(rc, "", "")
         self.load_default_config()
         kp_destroyed = KP(
             app_name=self.app_name,

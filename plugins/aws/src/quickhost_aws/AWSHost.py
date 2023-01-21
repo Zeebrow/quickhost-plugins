@@ -77,7 +77,8 @@ class AWSHost(AWSResourceBase):
         self.wait_for_hosts_to_start(num_hosts)
         ssh_strings = []
         app_insts_thingy = self._get_app_instances()
-        for inst in app_insts_thingy:
+        for i in app_insts_thingy:
+            inst = self._parse_host_output(i)
             logger.debug(f"match {_os}") 
             match _os:
                 case "ubuntu":
@@ -109,7 +110,7 @@ class AWSHost(AWSResourceBase):
             for r in app_hosts['Reservations']:
                 for host in r['Instances']:
                     if host['State']['Name'] in ['running', 'pending']:
-                        instances.append(self._descibe_instance(host=host))
+                        instances.append(self._parse_host_output(host=host))
         except ClientError as e:
             logger.error(f"(Security Group) Unhandled botocore client exception: ({e.response['Error']['Code']}): {e.response['Error']['Message']}")
             raise e
@@ -151,8 +152,6 @@ class AWSHost(AWSResourceBase):
                 for t in host['Tags']:
                     if t['Key'] == 'Name':
                         app_names.append(t['Value'])
-
-        
         if len(app_names) == 0:
             return None
         else:
@@ -168,6 +167,10 @@ class AWSHost(AWSResourceBase):
             return _rtn 
 
     def _get_app_instances(self) -> List[Any] | None:
+        """
+        TODO: Create a type to replace List[Any]
+        NOTE: to get 'describe' data, feed the output of this into self._describe
+        """
         app_instances = []
         all_hosts = self.client.describe_instances(
             Filters=[
@@ -181,7 +184,7 @@ class AWSHost(AWSResourceBase):
         for r in all_hosts['Reservations']:
             for host in r['Instances']:
                 app_instances.append(quickhost.scrub_datetime(host))
-                inst = self._descibe_instance(host=host)
+                inst = self._parse_host_output(host=host)
                 instance_ids.append(inst['instance_id'])
         if len(app_instances) == 0:
             return None
@@ -207,7 +210,7 @@ class AWSHost(AWSResourceBase):
             for host in r['Instances']:
                 if host['State']['Name'] in states:
                     app_instances.append(quickhost.scrub_datetime(host))
-                    inst = self._descibe_instance(host=host)
+                    inst = self._parse_host_output(host=host)
                     instance_ids.append(inst['instance_id'])
         if instance_ids == []:
             return None
@@ -241,9 +244,9 @@ class AWSHost(AWSResourceBase):
         sortedimages = sorted(response['Images'], key=lambda x: datetime.strptime(x['CreationDate'], '%Y-%m-%dT%H:%M:%S.%fZ'))
         return sortedimages[-1]['ImageId']
 
-    def _descibe_instance(self, host: dict, none_val=None):
+    def _parse_host_output(self, host: dict, none_val=None):
         """
-        get the pertinent data to one of the hosts in an app
+        Parse the output of boto3's "ec2.describe_instances()" Reservations.Instances for data. 
         If a property cannot be retrieved, it will be replaced with `none_val`.
         """
         none_val = None

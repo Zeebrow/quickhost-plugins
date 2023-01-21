@@ -140,7 +140,6 @@ class KP(AWSResourceBase):
                 KeyPairId=key_id,
                 DryRun=False
             )
-            print(f"{del_key=}")
             store_test_data(resource='AWSKeyPair', action='delete_key_pair', response_data=del_key)
             if ssh_key_file.exists():
                 os.remove(ssh_key_file)

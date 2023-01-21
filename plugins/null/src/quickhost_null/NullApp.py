@@ -71,5 +71,9 @@ under certain conditions; type `show c' for details.
         return ("null", "null", "null")
     
     @classmethod
-    def list_all():
-        return ("null", "null", "null")
+    def list_all(self):
+        return ("null", "null", 0)
+
+    @classmethod
+    def destroy_all(self):
+        return ("stdout null", "stderr null", 0)

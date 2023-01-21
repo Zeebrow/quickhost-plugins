@@ -25,11 +25,13 @@ class AWSParser(ParserBase):
         update_parser = subp.add_parser("update")
         destroy_parser = subp.add_parser("destroy")
         list_all_parser = subp.add_parser("list-all")
+        destroy_all_parser = subp.add_parser("destroy-all")
         self.add_init_parser_arguments(init_parser)
         self.add_make_parser_arguments(make_parser)
         self.add_describe_parser_arguments(describe_parser)
         self.add_update_parser_arguments(update_parser)
         self.add_destroy_parser_arguments(destroy_parser)
+        self.add_destroy_all_parser_arguments(destroy_all_parser)
 
     def add_parser_arguments(self, action: str, parser: ArgumentParser, help: bool) -> None:
         """
@@ -57,6 +59,9 @@ class AWSParser(ParserBase):
             exit(0)
 
         logger.debug(f"action is '{action}'")
+
+    def add_destroy_all_parser_arguments(self, parser: ArgumentParser):
+        parser.add_argument("-y", "--yes", action='store_true', help="force deletion without prompting for confirmation")
     
     def add_init_parser_arguments(self, parser: ArgumentParser):
         parser.add_argument("--profile", required=False, action='store', default=AWSConstants.DEFAULT_IAM_USER, help="profile of an admin AWS account used to create initial quickhost resources")
