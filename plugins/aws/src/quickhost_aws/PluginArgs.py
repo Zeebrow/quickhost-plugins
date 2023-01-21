@@ -26,53 +26,26 @@ class AWSParser(ParserBase):
         destroy_parser = subp.add_parser("destroy")
         list_all_parser = subp.add_parser("list-all")
         destroy_all_parser = subp.add_parser("destroy-all")
+        destroy_plugin_parser = subp.add_parser("destroy-plugin")
         self.add_init_parser_arguments(init_parser)
         self.add_make_parser_arguments(make_parser)
         self.add_describe_parser_arguments(describe_parser)
         self.add_update_parser_arguments(update_parser)
         self.add_destroy_parser_arguments(destroy_parser)
         self.add_destroy_all_parser_arguments(destroy_all_parser)
-
-    def add_parser_arguments(self, action: str, parser: ArgumentParser, help: bool) -> None:
-        """
-        (old) Add arguments to a single parser 
-        leave this here in case you don't like something about self.add_subparsers() again
-        """
-        if help:
-            p = ArgumentParser(f"aws {action}")
-        else:
-            p = parser
-
-        match action:
-            case 'init':
-                self.add_init_parser_arguments(parser=p)
-            case 'make':
-                self.add_make_parser_arguments(parser=p)
-            case 'describe':
-                self.add_describe_parser_arguments(parser=p)
-            case 'update':
-                self.add_update_parser_arguments(parser=p)
-            case 'destroy':
-                self.add_destroy_parser_arguments(parser=p)
-        if help:
-            p.print_help()
-            exit(0)
-
-        logger.debug(f"action is '{action}'")
+        self.add_destroy_plugin_parser_arguments(destroy_plugin_parser)
 
     def add_destroy_all_parser_arguments(self, parser: ArgumentParser):
         parser.add_argument("-y", "--yes", action='store_true', help="force deletion without prompting for confirmation")
+        parser.add_argument("--profile", required=False, action='store', default=AWSConstants.DEFAULT_IAM_USER, help="profile of an admin AWS account used to create initial quickhost resources")
+        parser.add_argument( "--region", required=False, action='store', choices=AWSConstants.AVAILABLE_REGIONS, default=AWSConstants.DEFAULT_REGION, help="AWS region in which to create initial quickhost resources")
     
     def add_init_parser_arguments(self, parser: ArgumentParser):
         parser.add_argument("--profile", required=False, action='store', default=AWSConstants.DEFAULT_IAM_USER, help="profile of an admin AWS account used to create initial quickhost resources")
-        parser.add_argument(
-            "--region",
-            required=False,
-            action='store',
-            choices=AWSConstants.AVAILABLE_REGIONS,
-            default=AWSConstants.DEFAULT_REGION,
-            help="AWS region in which to create initial quickhost resources"
-        )
+        parser.add_argument( "--region", required=False, action='store', choices=AWSConstants.AVAILABLE_REGIONS, default=AWSConstants.DEFAULT_REGION, help="AWS region in which to create initial quickhost resources")
+
+    def add_destroy_plugin_parser_arguments(self, parser: ArgumentParser):
+        parser.add_argument("--profile", required=False, action='store', default=AWSConstants.DEFAULT_IAM_USER, help="profile of an admin AWS account used to create initial quickhost resources")
         return None
 
     def add_make_parser_arguments(self, parser: ArgumentParser) -> None:
@@ -95,10 +68,13 @@ class AWSParser(ParserBase):
             "windows",
             "windows-core",
             ])
+        parser.add_argument("--profile", required=False, action='store', default=AWSConstants.DEFAULT_IAM_USER, help="profile of an admin AWS account used to create initial quickhost resources")
 
     def add_describe_parser_arguments(self, parser: ArgumentParser):
         parser.add_argument("-n", "--app-name", required=True, default=SUPPRESS, help="name of the app")
         parser.add_argument("--region", required=False, choices=AWSConstants.AVAILABLE_REGIONS, default=AWSConstants.DEFAULT_REGION, help="region to launch the host into.")
+        parser.add_argument("--profile", required=False, action='store', default=AWSConstants.DEFAULT_IAM_USER, help="profile of an admin AWS account used to create initial quickhost resources")
+        parser.add_argument("--show-password", required=False, action='store_true', help="For Windows instances, show the Administrator password in plaintext.")
         return None
 
     def add_update_parser_arguments(self, parser: ArgumentParser):
@@ -114,4 +90,5 @@ class AWSParser(ParserBase):
     def add_destroy_parser_arguments(self, parser: ArgumentParser):
         parser.add_argument("-n", "--app-name", required=True, default=SUPPRESS, help="name of the app")
         parser.add_argument("-r", "--region", required=False, default=AWSConstants.DEFAULT_REGION, help="region to launch the host into.")
+        parser.add_argument("--profile", required=False, action='store', default=AWSConstants.DEFAULT_IAM_USER, help="profile of an admin AWS account used to create initial quickhost resources")
         return None

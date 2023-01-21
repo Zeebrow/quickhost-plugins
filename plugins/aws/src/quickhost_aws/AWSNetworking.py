@@ -20,7 +20,7 @@ class AWSNetworking(AWSResourceBase):
     DefaultTag = { 'Value': f"{C.DEFAULT_APP_NAME}", 'Key': 'Name' }
     TagSpec = lambda resource: { 'ResourceType': resource, 'Tags': [ AWSNetworking.DefaultTag ] }
 
-    def __init__(self, app_name: str, profile=None, region=None, dry_run=False):
+    def __init__(self, app_name, profile, region, dry_run=False):
         self.app_name = app_name
         self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
         self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
@@ -193,28 +193,40 @@ class AWSNetworking(AWSResourceBase):
         }
         
     def destroy(self):
+        """
+        Destroy all networking-related AWS resources. Requires that no apps be running.
+        - Dissociate and delete route table
+        - Detatch and delete internet gateway
+        - Delete subnet
+        - Delete VPC
+        """
         self.__dict__.update(self.describe())
-        vpc = self.ec2.Vpc(self.vpc_id)
-        subnet = self.ec2.Subnet(self.subnet_id)
-        igw = self.ec2.InternetGateway(self.igw_id)
-        rt = self.ec2.RouteTable(self.rt_id)
-        rt_assoc_ids = [rtid['RouteTableAssociationId'] for rtid in rt.associations_attribute]
-        logger.debug(f"deleting {len(rt_assoc_ids)} associations on route table '{self.rt_id}'...")
-        for rtai in rt_assoc_ids:
-            self.ec2.RouteTableAssociation(rtai).delete(DryRun=False)
-        logger.debug(f"deleting route table '{self.rt_id}'...")
-        rt.delete(DryRun=False)
-
-        logger.debug(f"detaching igw '{self.igw_id}' from '{self.vpc_id}'...")
-        igw.detach_from_vpc(
-            DryRun=False,
-            VpcId=self.vpc_id
-        )
-        logger.debug(f"deleting igw '{self.igw_id}'...")
-        igw.delete(DryRun=False)
-        logger.debug(f"deleting subnet '{self.subnet_id}'...")
-        subnet.delete(DryRun=False)
-        logger.debug(f"deleting vpc '{self.vpc_id}'...")
-        vpc.delete(DryRun=False)
+        print(self.describe())
+        if self.rt_id:
+            rt = self.ec2.RouteTable(self.rt_id)
+            rt_assoc_ids = [rtid['RouteTableAssociationId'] for rtid in rt.associations_attribute]
+            logger.debug(f"deleting {len(rt_assoc_ids)} associations on route table '{self.rt_id}'...")
+            for rtai in rt_assoc_ids:
+                self.ec2.RouteTableAssociation(rtai).delete(DryRun=False)
+            logger.debug(f"deleting route table '{self.rt_id}'...")
+            rt.delete(DryRun=False)
+            
+        if self.igw_id:
+            igw = self.ec2.InternetGateway(self.igw_id)
+            logger.debug(f"detaching igw '{self.igw_id}' from '{self.vpc_id}'...")
+            igw.detach_from_vpc(
+                DryRun=False,
+                VpcId=self.vpc_id
+            )
+            logger.debug(f"deleting igw '{self.igw_id}'...")
+            igw.delete(DryRun=False)
+        if self.subnet_id:
+            subnet = self.ec2.Subnet(self.subnet_id)
+            logger.debug(f"deleting subnet '{self.subnet_id}'...")
+            subnet.delete(DryRun=False)
+        if self.vpc_id:
+            logger.debug(f"deleting vpc '{self.vpc_id}'...")
+            vpc = self.ec2.Vpc(self.vpc_id)
+            vpc.delete(DryRun=False)
         logger.debug(f"Done.")
 

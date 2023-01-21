@@ -52,7 +52,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         self.app_name = app_name
         self._client = boto3.client('ec2')
         self._ec2_resource = boto3.resource('ec2')
-        # super().__init__('aws', app_name)
         self.userdata = None
         self.ssh_key_filepath = None
         self.ami = None
@@ -68,11 +67,13 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         #self.load_default_config()
 
     def load_default_config(self, cache_ok=True, region=AWSConstants.DEFAULT_REGION, profile=AWSConstants.DEFAULT_IAM_USER):
+        logger.debug("load default config")
         networking_params = AWSNetworking(
             app_name=self.app_name,
             region=region,
             profile=profile
         ).describe(use_cache=cache_ok)
+        logger.debug("networking params: {}".format(networking_params))
         sts = self.get_client(
             'sts',
             region=region,
@@ -86,8 +87,8 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         self.user = calling_user_arn.resource
         self.account = calling_user_arn.account
         return networking_params
+
     def _print_loaded_args(self, d: dict, heading=None) -> None:
-        """ Wow this is bad.  """
         if d is None:
             logger.warning("No items to print!")
             return
@@ -114,11 +115,38 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             logger.warning("There's nowhere to show your results!")
         return None
 
-    def plugin_destroy(self, init_args: dict) -> CliResponse:
+    def plugin_destroy(self, plugin_destroy_args) -> CliResponse:
         """
-        Needs a list-all-apps or something similar (which I want, anyways)
+        TODO: @@@ all regions
         """
-        raise Exception("TODO")
+        params = {
+            "app_name": "uninstall-quickhost-aws",
+            # "region": plugin_destroy_args['region'], #@@@
+            "region": AWSConstants.DEFAULT_REGION, #@@@
+            "profile": plugin_destroy_args['profile'],
+        }
+        whoami, _ = self.get_client(resource='iam', region=params['region'], profile=params['profile'])
+        user_name = whoami['Arn'].split(":")[5].split("/")[-1]
+        user_id = whoami['UserId']
+        account = whoami['Account']
+        inp = input(f"About to initialize quickhost using:\nuser:\t\t{user_name} ({user_id})\naccount:\t{account}\n\nContinue? (y/n) ")
+        if not inp.lower() == ('y' or 'yes'):
+            return CliResponse(None, 'aborted', QHExit.ABORTED)
+        logger.info("destroying remaining apps")
+        AWSApp.destroy_all()
+        logger.info("destroying networking")
+        networking = AWSNetworking(
+            app_name=params['app_name'],
+            region=params['region'],
+            profile=params['profile']
+        ).destroy()
+        iam = Iam(
+            region=params['region'],
+            profile=params['profile']
+        ).destroy()
+
+        return CliResponse("Finished removing AWS resources from account '{}' in {}".format(account, params['region']), None, QHExit.OK)
+
 
     # @@@ CliResponse
     def plugin_init(self, init_args: dict) -> CliResponse:
@@ -148,7 +176,6 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         except QuickhostUnauthorized as e:
             finished_with_errors = True
             logger.error(f"Failed to create initial IAM resources: {e}")
-
         networking_params= AWSNetworking(
             app_name=self.app_name,
             profile=init_args['profile'],
@@ -174,24 +201,40 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         )
         iam_vals = Iam(
             region=params['region'],
-        ).describe(verbiage=1)
+            profile=params['profile'],
+        ).describe()
         sg = SG(
-            region=params['region'],
             app_name=self.app_name,
+            region=params['region'],
+            profile=params['profile'],
             vpc_id=self.vpc_id,
         )
         sg_describe = sg.describe()
-        kp = KP(
-            app_name=self.app_name,
-            region=params['region']
-        )
-        kp_describe = kp.describe()
         hosts = AWSHost(
             app_name=self.app_name,
-            region=params['region']
+            region=params['region'],
+            profile=params['profile'],
         )
         hosts_describe = hosts.describe()
         logger.debug(hosts_describe)
+        kp = KP(
+            app_name=self.app_name,
+            region=params['region'],
+            profile=params['profile'],
+        )
+        passwords = {}
+        for h in hosts_describe:
+            if h['platform'] in ['Windows',]:
+                if params['show_password']:
+                    passwords[h['instance_id']] = kp.windows_get_password(h['instance_id'])
+                else :
+                    passwords[h['instance_id']] = '*****************************'
+        for h in hosts_describe:
+            for inst_id, pw in passwords.items():
+                if inst_id == h['instance_id']:
+                    h['password'] = pw
+
+        kp_describe = kp.describe()
         caller_info = {
             'account': self.account,
             'invoking user': '/'.join(self.user.split('/')[1:])
@@ -210,19 +253,27 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         if kp_describe and hosts_describe and sg_describe:
             return CliResponse('Done', None, QHExit.OK)
         else:
-            return CliResponse('finished creating hosts with errors', "<placeholder>", 1)
+            return CliResponse(None, "Check logs for errors", 1)
 
     #@@@ need to get regions...
     @classmethod
-    def list_all(self):
+    def list_all(self, params):
         return CliResponse(json.dumps({
-            "apps": AWSHost.get_all_running_apps(),
+            "apps": AWSHost(
+                app_name="list-all",
+                profile=AWSConstants.DEFAULT_IAM_USER, #@@@
+                region=AWSConstants.DEFAULT_REGION, #@@@
+            ).get_all_running_apps(region=AWSConstants.DEFAULT_REGION) #@@@
             #...
         }, indent=3), None, QHExit.OK)
 
     @classmethod
     def destroy_all(self):
-        apps = AWSHost.get_all_running_apps()
+        apps = AWSHost(
+            app_name="destroy-all",
+            profile=AWSConstants.DEFAULT_IAM_USER,
+            region=AWSConstants.DEFAULT_REGION, #@@@
+        ).get_all_running_apps(region=AWSConstants.DEFAULT_REGION) #@@@
         if apps is None:
             return CliResponse("Nothing to destroy.", None, QHExit.OK)
         logger.info("Destroying {} apps".format(len(apps)))
@@ -230,7 +281,8 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             app = AWSApp(a.split(" ")[0])
             app.destroy(args={
                 "h": False,
-                "region": "us-east-1", #@@@ need to get region from AWSApp.list_all
+                "profile": AWSConstants.DEFAULT_IAM_USER,
+                "region": AWSConstants.DEFAULT_REGION, #@@@ need to get region from AWSApp.list_all
                 "yes": True
             })
             logger.info("Destroyed app '{}'".format(app.app_name))
@@ -239,17 +291,20 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     # @@@ CliResponse
     def create(self, args: dict) -> CliResponse:
-        # @@@ run_make
         logger.debug('make')
         stdout = ""
         stderr = ""
-        rc = QHExit.GENERAL_FAILURE
-        prompt_continue = input("proceed? (y/n)")
-        if not prompt_continue == 'y':
+        prompt_continue = input("proceed? (y/N): ")
+        if prompt_continue not in ['y', 'Y', 'yes', 'YES']:
             stderr = "aborted"
             return CliResponse(stdout, stderr, QHExit.ABORTED)
         params = self._parse_make(args)
 
+        # @@@ save info about app, i.e. name, region
+        # apps:
+        #   <app_name>:
+        #       region: <region>
+        #       ...
         self.load_default_config(region=params['region'])
         profile = AWSConstants.DEFAULT_IAM_USER
         kp = KP(app_name=self.app_name, region=params['region'], profile=profile)
@@ -290,18 +345,22 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
                 rc = QHExit.ABORTED
                 return CliResponse(rc, "", "")
         self.load_default_config()
+        print(args)
         kp_destroyed = KP(
             app_name=self.app_name,
             region=args['region'],
+            profile=args['profile']
         ).destroy()
         hosts = AWSHost(
             region=args['region'],
             app_name=self.app_name,
+            profile=args['profile']
         )
         hosts_destroyed = hosts.destroy()
         sg_destroyed = SG(
-            region=args['region'],
             app_name=self.app_name,
+            region=args['region'],
+            profile=args['profile'],
             vpc_id=self.vpc_id,
         ).destroy()
         if kp_destroyed and hosts_destroyed and sg_destroyed:

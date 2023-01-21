@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 
 class Iam(AWSResourceBase):
     """
-    Manage AWS IAM (account-global) quickhost resources' lifecycle
+    Manage AWS IAM (account-global) quickhost resources' lifecycle during
+    `main.py aws init` and future `main.py aws uninstall` actions.
     """
-    def __init__(self, profile=AWSConstants.DEFAULT_IAM_USER, region=AWSConstants.DEFAULT_REGION):
+    def __init__(self, profile, region):
         self._client_caller_info, self.client = self.get_client('iam', profile=profile, region=region)
         self._resource_caller_info, self.iam = self.get_resource('iam', profile=profile, region=region)
         if self._client_caller_info == self._resource_caller_info:
@@ -27,35 +28,46 @@ class Iam(AWSResourceBase):
         self.iam_group = f"{AWSConstants.DEFAULT_IAM_USER}s"
 
     def create(self):
+        """
+        Create required IAM resources for quickhost-aws to be able to operate.
+        Actions:
+        - Create IAM user with credentials
+            - Save AWS credentials to ~/.aws/credentials
+        - Create IAM group and add user
+        - Create IAM policies for CRUD and attach group
+        """
         if self.caller_info['username'] == AWSConstants.DEFAULT_IAM_USER:
             logger.warning(f"The default quickhost user is not allowed to 'init'!")
             raise QuickhostUnauthorized(f"The default quickhost user is not allowed to 'init'!",  operation='app init')
-        current_policies = self._describe_user_credentials()
         self.create_user_group()
         self._create_user_config()
         self._create_user_credentials()
         self.create_policies()
         self.attach_policies_and_group()
 
-    def describe(self, verbiage=4):
+    def describe(self):
+        """
+        Return info describing the IAM configuration for quickhost-aws.
+        """
         logger.debug("AWSIam.describe")
-        if verbiage < 1:
-            rtn = { 'iam-user': self._describe_iam_user(), }
-        elif verbiage >= 1:
-            rtn = {
-                'credentials': self._describe_user_credentials(),
-                'iam-user': self._describe_iam_user(),
-                'iam-group': self._describe_iam_group(),
-                'iam-policies': self._describe_iam_policies(),
-            }
-        return rtn
+        return {
+            'credentials': self._describe_user_credentials(),
+            'iam-user': self._describe_iam_user(),
+            'iam-group': self._describe_iam_group(),
+            'iam-policies': self._describe_iam_policies(),
+        }
 
     def destroy(self):
+        """
+        Delete all quickhost-aws IAM resources.
+        - Detatch IAM user from group and delete
+        - Remove IAM user credentials from ~/.aws/credentials
+        - Delete IAM group
+        """
         iam = self.iam
         policy_arns = self.qh_policy_arns()
         user = iam.User(self.iam_user)
         group = iam.Group(self.iam_group)
-        ########################################################
         try:
             group.remove_user(UserName=self.iam_user)
             logger.info(f"Removed user '{self.iam_user}' from group '{self.iam_group}'")
@@ -65,7 +77,6 @@ class Iam(AWSResourceBase):
                 logger.info(f"User '{self.iam_user}' was removed from Group '{self.iam_group}'")
             else:
                 logger.error(f"Unknown error caught while deleting group: {e}")
-        ########################################################
         for action,arn in policy_arns.items():
             if arn is None:
                 logger.info(f"Policy for '{action}' not found.")
@@ -78,7 +89,6 @@ class Iam(AWSResourceBase):
                 logger.info(f"Detatched policy {arn} from {group.name}... ")
             p.delete()
             logger.info(f"Deleted policy {p.arn}... ")
-        ########################################################
         try:
             group.delete()
             logger.info(f"Deleted group {group.arn}... ")
@@ -88,7 +98,6 @@ class Iam(AWSResourceBase):
                 logger.info(f"Group '{self.iam_group}' doesn't exist")
             else:
                 logger.error(f"Unknown error caught while deleting group: {e}")
-        ########################################################
         try:
             self._delete_user_config()
             self._delete_user_credentials()
@@ -102,14 +111,13 @@ class Iam(AWSResourceBase):
                 logger.error(f"Unknown error caught while deleting user: {e}")
 
     def create_policies(self):
-        iam = self.iam
         policy_arns = self.qh_policy_arns()
-        for action,arn in policy_arns.items():
-            arn = self._create_qh_policy(action)
+        for action, _ in policy_arns.items():
+            self._create_qh_policy(action)
 
     def attach_policies_and_group(self) -> bool:
         rtn = False
-        iam = self.iam
+        iam = self.iam #@@@???
         group = iam.Group(self.iam_group)
         policy_arns = self.qh_policy_arns()
         for action,arn in policy_arns.items():
@@ -132,7 +140,6 @@ class Iam(AWSResourceBase):
 
     def create_user_group(self):
         iam = self.iam
-        existing_policies = self.qh_policy_arns()
         user = iam.User(self.iam_user)
         group = iam.Group(self.iam_group)
         try:
@@ -145,7 +152,6 @@ class Iam(AWSResourceBase):
             code = e.__dict__['response']['Error']['Code']
             if code == 'EntityAlreadyExists':
                 logger.info(f"User '{self.iam_user}' already exists.")
-
         try: 
             group.create(
                 Path='/quickhost/',
@@ -184,7 +190,6 @@ class Iam(AWSResourceBase):
         return rtn
 
     def _create_qh_policy(self, action: str) -> str:
-        iam = self.iam
         existing_policies = self.qh_policy_arns()
         arn = None
         try: 
@@ -206,9 +211,7 @@ class Iam(AWSResourceBase):
 
     def _delete_user_config(self):
         current_credentials = self.describe()
-
         if current_credentials['credentials']['default-region'] is None:
-            #logger.warning("Unable to determine if config exists.")
             raise Exception("Unable to determine if config exists.")
 
         if current_credentials['credentials']['default-region'] != '':
@@ -230,7 +233,7 @@ class Iam(AWSResourceBase):
     def _delete_user_credentials(self):
         current_credentials = self.describe()
         if current_credentials['credentials']['credentials-exist'] is None:
-            #logger.warning("Unable to determine if credentials exist.")
+            logger.error("Unable to determine if credentials exist.")
             raise Exception("Unable to determine if credentials exist.")
 
         if current_credentials['credentials']['credentials-exist'] is True:
@@ -248,8 +251,6 @@ class Iam(AWSResourceBase):
                 logger.error(f"No credentials for '{self.iam_user}' found to remove.")
         else:
             logger.warning(f"No credentials for '{self.iam_user}' found to remove.")
-
-        # @@@ might be better in a delete_user()
         iam = self.iam
         user = iam.User(self.iam_user)
         keys = user.access_keys.all()
@@ -261,11 +262,10 @@ class Iam(AWSResourceBase):
     def _create_user_config(self, region='us-east-1', output='json'):
         current_credentials = self.describe()
         if current_credentials['credentials']['default-region'] is None:
-            #logger.warning("Unable to determine if config exists.")
+            logger.error("Unable to determine if config exists.")
             raise Exception("Unable to determine if config exists.")
 
         if not current_credentials['credentials']['default-region']:
-            iam = self.iam
             aws_config_dir = Path.home()/".aws"
             aws_config_file = aws_config_dir/"config"
             config_parser = ConfigParser()
@@ -292,6 +292,7 @@ class Iam(AWSResourceBase):
     def _create_user_credentials(self):
         current_credentials = self.describe()
         if current_credentials['credentials']['credentials-exist'] is None:
+            logger.error("Unable to determine if credentials exist.")
             raise Exception("Unable to determine if credentials exist.")
 
         if not current_credentials['credentials']['credentials-exist']:
@@ -303,8 +304,6 @@ class Iam(AWSResourceBase):
             if not aws_config_dir.exists():
                 logger.info(f"Creating new directory for aws credentials: {aws_config_dir.absolute()}")
                 logger.warning(f"(not really)")
-
-            # separate?
             user = iam.User(self.iam_user)
             access_key_pair = user.create_access_key_pair()
             if not self.iam_user in credentials_parser: # shoultn't be necessary
@@ -360,7 +359,6 @@ class Iam(AWSResourceBase):
             'arn': '',
             'access-keys': [],
         }
-
         iam = self.iam
         try:
             user = iam.User(self.iam_user)
@@ -407,7 +405,6 @@ class Iam(AWSResourceBase):
         finally:
             return rtn
 
-# see tmp/PolicyData-lambda.py for slightly-updated
 PolicyData = lambda QUICKHOST_ACCOUNT: {
     'create':{
         "Version": "2012-10-17",
@@ -461,7 +458,8 @@ PolicyData = lambda QUICKHOST_ACCOUNT: {
                     "ec2:DescribeSubnets",
                     "ec2:DescribeInternetGateways",
                     "ec2:DescribeRouteTables",
-                    "ec2:DescribeImages"
+                    "ec2:DescribeImages",
+                    "ec2:GetPasswordData"
                 ],
                 "Resource": "*"
             }

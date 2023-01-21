@@ -14,7 +14,7 @@ from .AWSResource import AWSResourceBase
 logger = logging.getLogger(__name__)
 
 class SG(AWSResourceBase):
-    def __init__(self, app_name: str, vpc_id: str, profile=AWSConstants.DEFAULT_IAM_USER, region=AWSConstants.DEFAULT_REGION):
+    def __init__(self, app_name, profile, region, vpc_id):
         self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
         self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
         if self._client_caller_info == self._resource_caller_info:

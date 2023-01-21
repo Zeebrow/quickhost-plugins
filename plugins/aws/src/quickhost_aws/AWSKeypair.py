@@ -4,6 +4,9 @@ import shutil
 from pathlib import Path
 from tempfile import mkstemp
 import os, sys
+import base64
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import serialization
 
 from botocore.exceptions import ClientError
 
@@ -18,8 +21,10 @@ from .constants import AWSConstants
 logger = logging.getLogger(__name__)
 
 class KP(AWSResourceBase):
-    #def __init__(self, client: any, ec2_resource: any, app_name: str, ssh_key_filepath=None, key_name=None, dry_run=True):
-    def __init__(self, app_name: str, profile=AWSConstants.DEFAULT_IAM_USER, region=AWSConstants.DEFAULT_REGION):
+    """
+    CRUD for ssh keys.
+    """
+    def __init__(self, app_name, profile, region):
         self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
         self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
         if self._client_caller_info == self._resource_caller_info:
@@ -102,7 +107,7 @@ class KP(AWSResourceBase):
             del new_key
             return rtn
 
-    def describe(self):
+    def describe(self, windows=False):
         rtn = {
             'key_id': None,
             'key_fingerprint': None,
@@ -127,6 +132,24 @@ class KP(AWSResourceBase):
             else:
                 logger.error(f"(Key Pair) Unhandled botocore client exception: ({code}): {e}")
                 return rtn
+
+    def windows_get_password(self, instance_id):
+        """Return the unencrypted password for the Adminstrator user"""
+        response = self.client.get_password_data(InstanceId=instance_id)
+        pw_data = response['PasswordData']
+        if pw_data == "":
+            logger.error("Could not retrieve password data. It is possible that the password has not been generated and will be available within the next 15 minutes. You may retrieve the password with main.py aws describe {} --show-password".format(self.app_name))
+            return "Try again later"
+
+        with open(f"{self.app_name}.pem", 'rb') as pemf:
+            privkey = serialization.load_pem_private_key(
+                pemf.read(),
+                password=None
+            )
+        return privkey.decrypt(
+            base64.b64decode(pw_data),
+            padding.PKCS1v15()
+        ).decode('utf-8')
 
     def destroy(self, ssh_key_file=None) -> bool:
         if not ssh_key_file:

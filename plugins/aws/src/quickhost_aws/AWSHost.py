@@ -22,12 +22,10 @@ from .AWSConfig import AWSHostConfig
 logger = logging.getLogger(__name__)
 
 class AWSHost(AWSResourceBase):
-    def __init__(
-            self,
-            app_name,
-            profile=AWSConstants.DEFAULT_IAM_USER,
-            region=AWSConstants.DEFAULT_REGION
-        ): #sigh
+    """
+    Class for AWS host operations.
+    """
+    def __init__(self, app_name, profile, region):
         self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
         self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
         if self._client_caller_info == self._resource_caller_info:
@@ -136,8 +134,16 @@ class AWSHost(AWSResourceBase):
         return self.wait_for_hosts_to_terminate(tgt_instances=tgt_instances)
     
     @classmethod
-    def get_all_running_apps(self) -> List[Any] | None:
-        dummy_awshost_instance_client = AWSHost('heres_your_problem').get_client("ec2")[1] #@@@@
+    def get_all_running_apps(self, region) -> List[Any] | None:
+        dummy_awshost_instance_client = AWSHost(
+            app_name='list-all',
+            profile=AWSConstants.DEFAULT_IAM_USER,
+            region=region,
+        ).get_client(
+            "ec2", 
+            profile=AWSConstants.DEFAULT_IAM_USER,
+            region=region,
+        )[1]
         all_running_hosts = dummy_awshost_instance_client.describe_instances( 
             Filters=[
                 { 'Name': f"tag-key", 'Values': [QHC.DEFAULT_APP_NAME] },
@@ -169,7 +175,7 @@ class AWSHost(AWSResourceBase):
     def _get_app_instances(self) -> List[Any] | None:
         """
         TODO: Create a type to replace List[Any]
-        NOTE: to get 'describe' data, feed the output of this into self._describe
+        NOTE: to get 'describe' data, feed the output of this into self._parse_host_output()
         """
         app_instances = []
         all_hosts = self.client.describe_instances(
@@ -260,8 +266,8 @@ class AWSHost(AWSResourceBase):
             'public_ip': _try_get_attr(host,'PublicIpAddress'),
             'subnet_id': _try_get_attr(host,'SubnetId'),
             'vpc_id': _try_get_attr(host,'VpcId'),
-            '_state': host['State']['Name'],
-            '_platform': _try_get_attr(host,'PlatformDetails'),
+            'state': host['State']['Name'],
+            'platform': _try_get_attr(host,'PlatformDetails'),
         }
 
     def get_userdata(self, filename: str):

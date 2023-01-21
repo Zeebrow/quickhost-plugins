@@ -12,7 +12,7 @@ class AWSResourceBase:
         session = boto3.session.Session(profile_name=profile, region_name=region)
         return session
 
-    def get_resource(self, resource, profile=AWSConstants.DEFAULT_IAM_USER, region=AWSConstants.DEFAULT_REGION):
+    def get_resource(self, resource, profile, region):
         session = self._get_session(profile=profile, region=region)
         sts = session.client('sts')
         whoami = sts.get_caller_identity()
@@ -25,7 +25,7 @@ class AWSResourceBase:
             logger.warning(f"You're about to do stuff with the non-quickhost user {whoami['Arn']}")
         return (whoami, session.resource(resource))
 
-    def get_client(self, resource, profile=AWSConstants.DEFAULT_IAM_USER, region=AWSConstants.DEFAULT_REGION):
+    def get_client(self, resource, profile, region):
         session = self._get_session(profile=profile, region=region)
         sts = session.client('sts')
         whoami = sts.get_caller_identity()
