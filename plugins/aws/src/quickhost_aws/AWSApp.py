@@ -257,7 +257,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
 
     #@@@ need to get regions...
     @classmethod
-    def list_all(self, params):
+    def list_all(self):
         return CliResponse(json.dumps({
             "apps": AWSHost(
                 app_name="list-all",
