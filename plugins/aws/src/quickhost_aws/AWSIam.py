@@ -3,16 +3,16 @@ import logging
 from configparser import ConfigParser
 from pathlib import Path
 
-import boto3
 from botocore.exceptions import ClientError
 
-from quickhost import scrub_datetime, store_test_data, scrub_datetime
+from quickhost import scrub_datetime
 
-from .utilities import get_single_result_id, check_running_as_user, QuickhostUnauthorized, Arn
+from .utilities import QuickhostUnauthorized, Arn
 from .constants import AWSConstants
 from .AWSResource import AWSResourceBase
 
 logger = logging.getLogger(__name__)
+
 
 class Iam(AWSResourceBase):
     """
@@ -37,8 +37,8 @@ class Iam(AWSResourceBase):
         - Create IAM policies for CRUD and attach group
         """
         if self.caller_info['username'] == AWSConstants.DEFAULT_IAM_USER:
-            logger.warning(f"The default quickhost user is not allowed to 'init'!")
-            raise QuickhostUnauthorized(f"The default quickhost user is not allowed to 'init'!",  operation='app init')
+            logger.warning("The default quickhost user is not allowed to 'init'!")
+            raise QuickhostUnauthorized("The default quickhost user is not allowed to 'init'!", operation='app init')
         self.create_user_group()
         self._create_user_config()
         self._create_user_credentials()
@@ -77,7 +77,7 @@ class Iam(AWSResourceBase):
                 logger.info(f"User '{self.iam_user}' was removed from Group '{self.iam_group}'")
             else:
                 logger.error(f"Unknown error caught while deleting group: {e}")
-        for action,arn in policy_arns.items():
+        for action, arn in policy_arns.items():
             if arn is None:
                 logger.info(f"Policy for '{action}' not found.")
                 continue
@@ -117,10 +117,10 @@ class Iam(AWSResourceBase):
 
     def attach_policies_and_group(self) -> bool:
         rtn = False
-        iam = self.iam #@@@???
+        iam = self.iam  # @@@???
         group = iam.Group(self.iam_group)
         policy_arns = self.qh_policy_arns()
-        for action,arn in policy_arns.items():
+        for action, arn in policy_arns.items():
             _arn = Arn(arn)
             if _arn.is_arn(arn):
                 group.attach_policy(PolicyArn=policy_arns[action])
@@ -152,11 +152,11 @@ class Iam(AWSResourceBase):
             code = e.__dict__['response']['Error']['Code']
             if code == 'EntityAlreadyExists':
                 logger.info(f"User '{self.iam_user}' already exists.")
-        try: 
+        try:
             group.create(
                 Path='/quickhost/',
                 GroupName=self.iam_group
-                #Tags=[ { 'Key': 'quickhost', 'Value': 'aws' }, ]
+                # Tags=[ { 'Key': 'quickhost', 'Value': 'aws' }, ]
             )
             logger.info(f"Created group '{self.iam_group}'")
         except ClientError as e:
@@ -192,7 +192,7 @@ class Iam(AWSResourceBase):
     def _create_qh_policy(self, action: str) -> str:
         existing_policies = self.qh_policy_arns()
         arn = None
-        try: 
+        try:
             new_policy = self.client.create_policy(
                 PolicyName=f"quickhost-{action}",
                 Path='/quickhost/',
@@ -215,8 +215,8 @@ class Iam(AWSResourceBase):
             raise Exception("Unable to determine if config exists.")
 
         if current_credentials['credentials']['default-region'] != '':
-            aws_config_dir = Path.home()/".aws"
-            aws_config_file = aws_config_dir/"config"
+            aws_config_dir = Path.home() / ".aws"
+            aws_config_file = aws_config_dir / "config"
             config_parser = ConfigParser()
             config_parser.read(aws_config_file)
             cfg_deleted = config_parser.remove_section(f"profile {self.iam_user}")
@@ -225,7 +225,7 @@ class Iam(AWSResourceBase):
                     config_parser.write(aws_cfg)
                 logger.info(f"deleted {self.iam_user} from aws config file.")
             else:
-                logger.error(f"Can't delete profile for {self.iam_user}: does not exist.") 
+                logger.error(f"Can't delete profile for {self.iam_user}: does not exist.")
         else:
             logger.warning(f"Can't delete profile for {self.iam_user}: does not exist.")
         return False
@@ -237,8 +237,8 @@ class Iam(AWSResourceBase):
             raise Exception("Unable to determine if credentials exist.")
 
         if current_credentials['credentials']['credentials-exist'] is True:
-            aws_config_dir = Path.home()/".aws"
-            aws_credentials_file = aws_config_dir/"credentials"
+            aws_config_dir = Path.home() / ".aws"
+            aws_credentials_file = aws_config_dir / "credentials"
 
             credentials_parser = ConfigParser()
             credentials_parser.read(aws_credentials_file)
@@ -257,7 +257,7 @@ class Iam(AWSResourceBase):
         for k in keys:
             logger.info(f"Deleting access key: {k.id}...")
             k.delete()
-        return 
+        return
 
     def _create_user_config(self, region='us-east-1', output='json'):
         current_credentials = self.describe()
@@ -266,15 +266,17 @@ class Iam(AWSResourceBase):
             raise Exception("Unable to determine if config exists.")
 
         if not current_credentials['credentials']['default-region']:
-            aws_config_dir = Path.home()/".aws"
-            aws_config_file = aws_config_dir/"config"
+            aws_config_dir = Path.home() / ".aws"
+            aws_config_file = aws_config_dir / "config"
             config_parser = ConfigParser()
             config_parser.read(aws_config_file)
 
+            # @@@ handle aws cli setup?
             if not aws_config_dir.exists():
                 logger.info(f"Creating new directory for aws credentials: {aws_config_dir.absolute()}")
-                logger.warning(f"(not really)")
-            if not self.iam_user in config_parser:
+                logger.warning("(not really)")
+            # @@@ testme
+            if self.iam_user not in config_parser:
                 config_parser[f"profile {self.iam_user}"] = {
                     'region': region,
                     'output': output,
@@ -283,7 +285,7 @@ class Iam(AWSResourceBase):
                     config_parser.write(aws_cfg)
                 logger.info(f"Added {self.iam_user} profile to {aws_config_file.absolute()}.")
                 return True
-            else: # should never reach here
+            else:  # should never reach here
                 logger.error(f"Profile for {self.iam_user} already exists.")
         else:
             logger.warning(f"Profile for {self.iam_user} already exists.")
@@ -297,16 +299,17 @@ class Iam(AWSResourceBase):
 
         if not current_credentials['credentials']['credentials-exist']:
             iam = self.iam
-            aws_config_dir = Path.home()/".aws" 
-            aws_credentials_file = aws_config_dir/"credentials"
+            aws_config_dir = Path.home() / ".aws"
+            aws_credentials_file = aws_config_dir / "credentials"
             credentials_parser = ConfigParser()
             credentials_parser.read(aws_credentials_file)
+            # @@@ handle aws cli setup?
             if not aws_config_dir.exists():
                 logger.info(f"Creating new directory for aws credentials: {aws_config_dir.absolute()}")
-                logger.warning(f"(not really)")
+                logger.warning("(not really)")
             user = iam.User(self.iam_user)
             access_key_pair = user.create_access_key_pair()
-            if not self.iam_user in credentials_parser: # shoultn't be necessary
+            if self.iam_user not in credentials_parser:  # shoultn't be necessary
                 credentials_parser[self.iam_user] = {
                     'aws_access_key_id': access_key_pair.id,
                     'aws_secret_access_key': access_key_pair.secret,
@@ -320,18 +323,18 @@ class Iam(AWSResourceBase):
 
     def _describe_iam_policies(self):
         rtn = {
-            'create': None, 
-            'describe': None, 
-            'update': None, 
-            'destroy': None, 
+            'create': None,
+            'describe': None,
+            'update': None,
+            'destroy': None,
         }
-        policies = self.qh_policy_arns() #exceptions handled here
-        for k,v in policies.items():
+        policies = self.qh_policy_arns()  # exceptions handled here
+        for k, v in policies.items():
             if v is not None:
                 rtn[k] = v
             else:
                 rtn[k] = ''
-        return rtn # should never have a None field
+        return rtn  # should never have a None field
 
     def _describe_iam_group(self):
         rtn = {
@@ -348,7 +351,7 @@ class Iam(AWSResourceBase):
             else:
                 logger.error(f"Unknown error caught: {e}")
                 return f"ERROR ({code})"
-            return rtn # return before trying to get nogroup's policies.
+            return rtn  # return before trying to get nogroup's policies.
         for attached_policy in group.attached_policies.all():
             rtn['attached-policies'].append(attached_policy.arn)
         return rtn
@@ -369,11 +372,11 @@ class Iam(AWSResourceBase):
                 logger.info(f"User '{self.iam_user}' was removed from Group '{self.iam_group}'")
             else:
                 logger.error(f"Unknown error caught while deleting group: {e}")
-            return rtn 
+            return rtn
         for key in user.access_keys.all():
             rtn['access-keys'].append(f"{key.access_key_id} ({key.status})")
         return rtn
-        
+
     def _describe_user_credentials(self):
         rtn = {
             'default-region': None,
@@ -405,94 +408,94 @@ class Iam(AWSResourceBase):
         finally:
             return rtn
 
-PolicyData = lambda QUICKHOST_ACCOUNT: {
-    'create':{
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "quickhostCreate",
-                "Effect": "Allow",
-                "Action": [
-                    "ec2:CreateKeyPair",
-                    "ec2:CreateTags",
-                    "ec2:RunInstances",
-                    "ec2:AuthorizeSecurityGroupIngress",
-                    "ec2:CreateSecurityGroup"
-                ],
-                "Resource": "*"
-            }
-        ]
-    },
-    'describe': {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "quickhostDescribeUserActions",
-                "Effect": "Allow",
-                "Action": [
-                    "iam:GetUser",
-                    "iam:GetGroup",
-                    "iam:ListUsers",
-                    "iam:ListAccessKeys",
-                    "iam:ListAttachedGroupPolicies",
-                ],
-                "Resource": [
-                    f"arn:aws:iam::{QUICKHOST_ACCOUNT}:user/quickhost/*",
-                    f"arn:aws:iam::{QUICKHOST_ACCOUNT}:group/quickhost/*"
-                ]
-            },
-            {
-                "Sid": "quickhostDescribePolicies",
-                "Effect": "Allow",
-                "Action": [
-                    "iam:ListPolicies",
-                ],
-                "Resource": f"arn:aws:iam::{QUICKHOST_ACCOUNT}:policy/quickhost/*"
-            },
-            {
-                "Sid": "quickhostDescribe",
-                "Effect": "Allow",
-                "Action": [
-                    "ec2:DescribeInstances",
-                    "ec2:DescribeVpcs",
-                    "ec2:DescribeSubnets",
-                    "ec2:DescribeInternetGateways",
-                    "ec2:DescribeRouteTables",
-                    "ec2:DescribeImages",
-                    "ec2:GetPasswordData"
-                ],
-                "Resource": "*"
-            }
-        ]
-    },
-    'update': {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "quickhostUpdate",
-                "Effect": "Allow",
-                "Action": [],
-                "Resource": "*"
-            }
-        ]
-    },
-    'destroy': {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "quickhostDelete",
-                "Effect": "Allow",
-                "Action": [
-                    "ec2:DescribeSecurityGroups",
-                    "ec2:DeleteSecurityGroup",
 
-                    "ec2:DeleteKeyPair",
-                    "ec2:DescribeKeyPairs",
-                    
-                    "ec2:TerminateInstances"
-                ],
-                "Resource": "*"
-            }
-        ]
+def PolicyData(QUICKHOST_ACCOUNT):
+    return {
+        'create': {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "quickhostCreate",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ec2:CreateKeyPair",
+                        "ec2:CreateTags",
+                        "ec2:RunInstances",
+                        "ec2:AuthorizeSecurityGroupIngress",
+                        "ec2:CreateSecurityGroup"
+                    ],
+                    "Resource": "*"
+                }
+            ]
+        },
+        'describe': {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "quickhostDescribeUserActions",
+                    "Effect": "Allow",
+                    "Action": [
+                        "iam:GetUser",
+                        "iam:GetGroup",
+                        "iam:ListUsers",
+                        "iam:ListAccessKeys",
+                        "iam:ListAttachedGroupPolicies",
+                    ],
+                    "Resource": [
+                        f"arn:aws:iam::{QUICKHOST_ACCOUNT}:user/quickhost/*",
+                        f"arn:aws:iam::{QUICKHOST_ACCOUNT}:group/quickhost/*"
+                    ]
+                },
+                {
+                    "Sid": "quickhostDescribePolicies",
+                    "Effect": "Allow",
+                    "Action": [
+                        "iam:ListPolicies",
+                    ],
+                    "Resource": f"arn:aws:iam::{QUICKHOST_ACCOUNT}:policy/quickhost/*"
+                },
+                {
+                    "Sid": "quickhostDescribe",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ec2:DescribeInstances",
+                        "ec2:DescribeVpcs",
+                        "ec2:DescribeSubnets",
+                        "ec2:DescribeInternetGateways",
+                        "ec2:DescribeRouteTables",
+                        "ec2:DescribeImages",
+                        "ec2:GetPasswordData"
+                    ],
+                    "Resource": "*"
+                }
+            ]
+        },
+        'update': {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "quickhostUpdate",
+                    "Effect": "Allow",
+                    "Action": [],
+                    "Resource": "*"
+                }
+            ]
+        },
+        'destroy': {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "quickhostDelete",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ec2:DescribeSecurityGroups",
+                        "ec2:DeleteSecurityGroup",
+                        "ec2:DeleteKeyPair",
+                        "ec2:DescribeKeyPairs",
+                        "ec2:TerminateInstances"
+                    ],
+                    "Resource": "*"
+                }
+            ]
+        }
     }
-}

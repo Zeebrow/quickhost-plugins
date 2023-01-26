@@ -1,25 +1,20 @@
 from typing import List, Any
 import time
 import logging
-import json
 from datetime import datetime
-from copy import copy
 from collections import defaultdict
 
-import boto3
 from botocore.exceptions import ClientError
 
 import quickhost
 from quickhost import APP_CONST as QHC
 from quickhost.temp_data_collector import store_test_data
 
-from .AWSSG import SG
 from .constants import AWSConstants
 from .AWSResource import AWSResourceBase
-from .AWSConfig import AWSHostConfig
-
 
 logger = logging.getLogger(__name__)
+
 
 class AWSHost(AWSResourceBase):
     """
@@ -30,7 +25,7 @@ class AWSHost(AWSResourceBase):
         self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
         if self._client_caller_info == self._resource_caller_info:
             self.caller_info = self._client_caller_info
-        self.app_name=app_name
+        self.app_name = app_name
         self.host_count = None
 
     def create(self, num_hosts, instance_type, sgid, subnet_id, userdata, key_name, _os, dry_run=False):
@@ -43,13 +38,13 @@ class AWSHost(AWSResourceBase):
             'ImageId': image_id,
             'InstanceType': instance_type,
             'KeyName': key_name,
-            'Monitoring':{ 'Enabled': False },
-            'MaxCount':int(num_hosts),
-            'MinCount':1,
-            'DisableApiTermination':False,
-            'DryRun':dry_run,
-            'InstanceInitiatedShutdownBehavior':'terminate',
-            'NetworkInterfaces':[
+            'Monitoring': { 'Enabled': False },
+            'MaxCount': int(num_hosts),
+            'MinCount': 1,
+            'DisableApiTermination': False,
+            'DryRun': dry_run,
+            'InstanceInitiatedShutdownBehavior': 'terminate',
+            'NetworkInterfaces': [
                 {
                     'AssociatePublicIpAddress': True,
                     'DeviceIndex': 0,
@@ -57,13 +52,13 @@ class AWSHost(AWSResourceBase):
                     'Groups': [ sgid ],
                 }
             ],
-            'TagSpecifications':[
+            'TagSpecifications': [
                 { 'ResourceType': 'instance', 'Tags': [
-                    { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name}, 
-                    { 'Key': "Name", 'Value': self.app_name}, 
+                    { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name },
+                    { 'Key': "Name", 'Value': self.app_name },
                 ]},
                 { 'ResourceType': 'volume', 'Tags': [
-                    { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name}, 
+                    { 'Key': QHC.DEFAULT_APP_NAME, 'Value': self.app_name },
                 ]},
             ],
         }
@@ -77,29 +72,29 @@ class AWSHost(AWSResourceBase):
         app_insts_thingy = self._get_app_instances()
         for i in app_insts_thingy:
             inst = self._parse_host_output(i)
-            logger.debug(f"match {_os}") 
+            logger.debug(f"match {_os}")
             match _os:
                 case "ubuntu":
-                        ssh_strings.append(f"ssh -i {key_name} ubuntu@{inst['public_ip']}")
+                    ssh_strings.append(f"ssh -i {key_name} ubuntu@{inst['public_ip']}")
                 case "amazon-linux-2":
-                        ssh_strings.append(f"ssh -i {key_name} ec2-user@{inst['public_ip']}")
+                    ssh_strings.append(f"ssh -i {key_name} ec2-user@{inst['public_ip']}")
                 case "windows":
-                        ssh_strings.append(f"*{inst['public_ip']}")
+                    ssh_strings.append(f"*{inst['public_ip']}")
                 case "windows-core":
-                        ssh_strings.append(f"*{inst['public_ip']}")
+                    ssh_strings.append(f"*{inst['public_ip']}")
                 case _:
-                    logger.warning(f"invalid os '{_os}'") 
-        [ print(f"host {i}) {ssh}") for i,ssh in enumerate(ssh_strings) ]
+                    logger.warning(f"invalid os '{_os}'")
+        [ print(f"host {i}) {ssh}") for i, ssh in enumerate(ssh_strings) ]
         return True
 
     def describe(self) -> List[Any] | None:
         logger.debug("AWSHost.describe")
         instances = []
-        try: 
+        try:
             app_hosts = self.client.describe_instances(
                 Filters=[
-                    { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
-                    { 'Name': 'instance-state-name', 'Values': ['running', 'pending']},
+                    { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name,] },
+                    { 'Name': 'instance-state-name', 'Values': ['running', 'pending'] },
                 ],
                 DryRun=False,
                 MaxResults=10,
@@ -118,7 +113,7 @@ class AWSHost(AWSResourceBase):
             return instances
 
     def destroy(self) -> bool:
-        logger.debug(f"destroying instnaces: ")
+        logger.debug("destroying instnaces: ")
         tgt_instances = self.get_instance_ids('running')
         if tgt_instances is None:
             logger.debug(f"No instances found for app '{self.app_name}'")
@@ -132,7 +127,7 @@ class AWSHost(AWSResourceBase):
             logger.error(e)
             return False
         return self.wait_for_hosts_to_terminate(tgt_instances=tgt_instances)
-    
+
     @classmethod
     def get_all_running_apps(self, region) -> List[Any] | None:
         dummy_awshost_instance_client = AWSHost(
@@ -140,14 +135,14 @@ class AWSHost(AWSResourceBase):
             profile=AWSConstants.DEFAULT_IAM_USER,
             region=region,
         ).get_client(
-            "ec2", 
+            'ec2',
             profile=AWSConstants.DEFAULT_IAM_USER,
             region=region,
         )[1]
-        all_running_hosts = dummy_awshost_instance_client.describe_instances( 
+        all_running_hosts = dummy_awshost_instance_client.describe_instances(
             Filters=[
-                { 'Name': f"tag-key", 'Values': [QHC.DEFAULT_APP_NAME] },
-                { 'Name': 'instance-state-name', 'Values': ['running']},
+                { 'Name': 'tag-key', 'Values': [QHC.DEFAULT_APP_NAME] },
+                { 'Name': 'instance-state-name', 'Values': ['running'] },
             ],
             DryRun=False,
             MaxResults=101,
@@ -165,12 +160,12 @@ class AWSHost(AWSResourceBase):
             for app_name in app_names:
                 app_name_count[app_name] += 1
             _rtn = []
-            for k,v in app_name_count.items():
-                if v >1:
+            for k, v in app_name_count.items():
+                if v > 1:
                     _rtn.append("{} ({})".format(k, v))
                 else:
                     _rtn.append(k)
-            return _rtn 
+            return _rtn
 
     def _get_app_instances(self) -> List[Any] | None:
         """
@@ -181,7 +176,7 @@ class AWSHost(AWSResourceBase):
         all_hosts = self.client.describe_instances(
             Filters=[
                 { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
-                { 'Name': 'instance-state-name', 'Values': ['running']},
+                { 'Name': 'instance-state-name', 'Values': ['running'] },
             ],
             DryRun=False,
             MaxResults=10,
@@ -204,7 +199,7 @@ class AWSHost(AWSResourceBase):
         all_hosts = self.client.describe_instances(
             Filters=[
                 { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
-                { 'Name': 'instance-state-name', 'Values': list(states)},
+                { 'Name': 'instance-state-name', 'Values': list(states) },
             ],
             DryRun=False,
             MaxResults=10,
@@ -224,7 +219,7 @@ class AWSHost(AWSResourceBase):
 
     def get_latest_image(self, os='amazon-linux-2'):
         """
-        NOTE: (us-east-1, 12/19/2022) Free tier eligible customers can get up to 30 GB of 
+        NOTE: (us-east-1, 12/19/2022) Free tier eligible customers can get up to 30 GB of
         EBS General Purpose (SSD) or Magnetic storage
         """
         filterset = [
@@ -252,26 +247,27 @@ class AWSHost(AWSResourceBase):
 
     def _parse_host_output(self, host: dict, none_val=None):
         """
-        Parse the output of boto3's "ec2.describe_instances()" Reservations.Instances for data. 
+        Parse the output of boto3's "ec2.describe_instances()" Reservations.Instances for data.
         If a property cannot be retrieved, it will be replaced with `none_val`.
         """
         none_val = None
-        _try_get_attr = lambda d,attr: d[attr] if attr in d.keys() else none_val
+        # @@@ E731 I want test cases first
+        _try_get_attr = lambda d, attr: d[attr] if attr in d.keys() else none_val
         return {
             'app_name': self.app_name,
-            'ami': _try_get_attr(host,'ImageId'),
-            'security_group': _try_get_attr(host,'SecurityGroups')[0]['GroupId'],
-            'instance_id': _try_get_attr(host,'InstanceId'),
-            'instance_type': _try_get_attr(host,'InstanceType'),
-            'public_ip': _try_get_attr(host,'PublicIpAddress'),
-            'subnet_id': _try_get_attr(host,'SubnetId'),
-            'vpc_id': _try_get_attr(host,'VpcId'),
+            'ami': _try_get_attr(host, 'ImageId'),
+            'security_group': _try_get_attr(host, 'SecurityGroups')[0]['GroupId'],
+            'instance_id': _try_get_attr(host, 'InstanceId'),
+            'instance_type': _try_get_attr(host, 'InstanceType'),
+            'public_ip': _try_get_attr(host, 'PublicIpAddress'),
+            'subnet_id': _try_get_attr(host, 'SubnetId'),
+            'vpc_id': _try_get_attr(host, 'VpcId'),
             'state': host['State']['Name'],
-            'platform': _try_get_attr(host,'PlatformDetails'),
+            'platform': _try_get_attr(host, 'PlatformDetails'),
         }
 
     def get_userdata(self, filename: str):
-        data=None
+        data = None
         with open(filename, 'r') as ud:
             data = ud.read()
         return data
@@ -280,7 +276,7 @@ class AWSHost(AWSResourceBase):
         app_hosts = quickhost.scrub_datetime(self.client.describe_instances(
             Filters=[
                 { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
-                { 'Name': f"instance-state-name", 'Values': ['running'] },
+                { 'Name': 'instance-state-name', 'Values': ['running'] },
             ],
             DryRun=False,
             MaxResults=10,
@@ -288,11 +284,12 @@ class AWSHost(AWSResourceBase):
         count = 0
         for r in app_hosts['Reservations']:
             logger.debug(f"got {len(r['Instances'])} instances")
-            for i,host in enumerate(r['Instances']):
+            # @@@ get rid of i
+            for i, host in enumerate(r['Instances']):
                 if host['State']['Name'] == 'running':
                     count += 1
         return count
-        
+
     def wait_for_hosts_to_terminate(self, tgt_instances):
         """'blocks' until hosts tagged 'app_name' have a State Name of 'running'"""
         print(f"===================Waiting on hosts for '{self.app_name}'=========================")
@@ -304,7 +301,7 @@ class AWSHost(AWSResourceBase):
             app_hosts = quickhost.scrub_datetime(self.client.describe_instances(
                 Filters=[
                     { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
-                    { 'Name': f"instance-state-name", 'Values': ['running', 'terminated', 'shutting-down'] },
+                    { 'Name': 'instance-state-name', 'Values': ['running', 'terminated', 'shutting-down'] },
                 ],
                 DryRun=False,
                 MaxResults=10,
@@ -322,7 +319,7 @@ class AWSHost(AWSResourceBase):
                             case _:
                                 if not (host['InstanceId'] in other_hosts):
                                     other_hosts.append(host['InstanceId'])
-                                #@@@
+                                # @@@
             print(f"""other: {other_hosts} ({len(ready_hosts)}/{tgt_count}) Ready: {ready_hosts} Waiting: {waiting_on_hosts}\r""", end='')
             if len(ready_hosts) == tgt_count:
                 print()
@@ -341,8 +338,8 @@ class AWSHost(AWSResourceBase):
                 return True
             app_hosts = quickhost.scrub_datetime(self.client.describe_instances(
                 Filters=[
-                    { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [ self.app_name, ] },
-                    { 'Name': f"instance-state-name", 'Values': ['running', 'pending'] },
+                    { 'Name': f"tag:{QHC.DEFAULT_APP_NAME}", 'Values': [self.app_name,] },
+                    { 'Name': 'instance-state-name', 'Values': ['running', 'pending'] },
                 ],
                 DryRun=False,
                 MaxResults=10,
@@ -352,7 +349,7 @@ class AWSHost(AWSResourceBase):
                     match host['State']['Name']:
                         case 'running':
                             if not (host['InstanceId'] in ready_hosts):
-                                if host['InstanceId'] in waiting_on_hosts: #should always be True
+                                if host['InstanceId'] in waiting_on_hosts:  # should always be True
                                     ready_hosts.append(host['InstanceId'])
                                     waiting_on_hosts.remove(host['InstanceId'])
                         case 'pending':
@@ -360,17 +357,18 @@ class AWSHost(AWSResourceBase):
                                 waiting_on_hosts.append(host['InstanceId'])
                         case _:
                             if not (host['InstanceId'] in other_hosts):
-                                print(f"host {host['InstanceId']} in state {host['State']['Name']}")
                                 logger.debug("HERE BUG")
                                 other_hosts.append(host['InstanceId'])
-                            #@@@
-            print(f"""other: {other_hosts} ({len(ready_hosts)}/{tgt_count}) Ready: {ready_hosts} Waiting: ({len(waiting_on_hosts)}): {waiting_on_hosts}\r""", end='')
+            print("other: {} ({}/{}) Ready: {} Waiting: ({}): {}\r".format(
+                other_hosts, len(ready_hosts), tgt_count, ready_hosts, len(waiting_on_hosts), waiting_on_hosts
+            ), end='')
             time.sleep(1)
 
-def _new_filter(name: str, values: list|str):
-    if (type(values) == type("")):
+
+def _new_filter(name: str, values: list | str):
+    if (isinstance(values, str)):
         return {'Name': name, 'Values': [values]}
-    elif (type(values) == type([])):
+    elif (isinstance(values, list)):
         return {'Name': name, 'Values': values}
     else:
         raise Exception(f"invalid type '{type(values)}' in filter expression")

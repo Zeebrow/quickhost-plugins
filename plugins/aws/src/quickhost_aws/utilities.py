@@ -1,14 +1,18 @@
-import datetime
-import json
-import urllib.request
 import logging
+
 import boto3
 from botocore.exceptions import ClientError
+
+from quickhost import constants as C
 
 from .constants import AWSConstants
 
 logger = logging.getLogger(__name__)
-QH_Tag= lambda app_name: { 'Key': 'quickhost', 'Value': app_name }
+
+
+def QH_Tag(app_name):
+    return { 'Key': 'quickhost', 'Value': app_name }
+
 
 def get_single_result_id(resource_type, resource, plural=True):
     """
@@ -22,7 +26,7 @@ def get_single_result_id(resource_type, resource, plural=True):
         return resource[f"{resource_type}"][f"{resource_type}Id"]
 
     if len(_l) == 1:
-        logger.debug(f"Found 1 {resource_type}.")#: {resource}")
+        logger.debug(f"Found 1 {resource_type}.")
         return _l[0][f"{resource_type}Id"]
     if len(_l) < 1:
         logger.info(f"No {resource_type}s were found.")
@@ -33,8 +37,9 @@ def get_single_result_id(resource_type, resource, plural=True):
     logger.error("something went wrong getting resource id")
     return None
 
+
 def check_running_as_user(tgt_user_name=AWSConstants.DEFAULT_IAM_USER):
-    sts = boto3.client( 'sts',)
+    sts = boto3.client('sts')
     caller_id = sts.get_caller_identity()
     iam = boto3.client('iam')
 
@@ -52,27 +57,34 @@ def check_running_as_user(tgt_user_name=AWSConstants.DEFAULT_IAM_USER):
         return False
     return True
 
+
+# @@@ deleteme
 def get_ssh(key_filepath, ip, username='ec2-user'):
     print(f"ssh -i {key_filepath} {username}@{ip}")
+
 
 def handle_client_error(e: ClientError):
     code = e['Error']['Code']
     if code == 'UnauthorizedOperation':
         logger.error(f"({code}): {e.operation_name}")
 
+
+# @@@ deleteme
 class Null:
     pass
+
+
+# @@@ deleteme
 class UNDEFINED:
     pass
 
-def quickmemo(f, *args, **kwargs):
-    """
-    named to confer the function's relatively shitty nature
-    """
+
+def quickmemo(f):
     cache = {}
+
     def foo(*args, **kwargs):
         if 'use_cache' in kwargs:
-            if kwargs['use_cache'] == False:
+            if not kwargs['use_cache']:
                 return f(*args, **kwargs)
         if 'a' not in cache:
             cache['a'] = f(*args, **kwargs)
@@ -82,6 +94,8 @@ def quickmemo(f, *args, **kwargs):
         return cache['a']
     return foo
 
+
+# @@@ remove unhelpful docstrings
 class QuickhostUnauthorized(Exception):
     """
     https://github.com/boto/botocore/blob/develop/botocore/exceptions.py
@@ -93,11 +107,13 @@ class QuickhostUnauthorized(Exception):
             self.operation,
             self.message
         )
+
     def __init__(self, username, operation, message=''):
         self.username = username
         self.operation = operation
         self.message = message
         Exception.__init__(self, self.fmt())
+
 
 class Arn:
     def __init__(self, arn):
@@ -108,12 +124,12 @@ class Arn:
         else:
             self.error = arn
             self.arn = None
+
     def __repr__(self):
         return str(self.arn)
 
     @classmethod
-    def is_arn(self, arn:str):
+    def is_arn(self, arn: str):
         if type(arn) != str or not arn.startswith("arn:") or len(arn.split(":")) != 6:
             return False
         return True
-

@@ -1,24 +1,21 @@
 import logging
 import json
-import shutil
 from pathlib import Path
-from tempfile import mkstemp
-import os, sys
+import os
 import base64
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization
 
 from botocore.exceptions import ClientError
 
-import quickhost
 from quickhost import APP_CONST as C
 from quickhost import store_test_data, scrub_datetime
 
-from .utilities import get_single_result_id, handle_client_error, UNDEFINED
+from .utilities import get_single_result_id, handle_client_error
 from .AWSResource import AWSResourceBase
-from .constants import AWSConstants
 
 logger = logging.getLogger(__name__)
+
 
 class KP(AWSResourceBase):
     """
@@ -30,7 +27,7 @@ class KP(AWSResourceBase):
         if self._client_caller_info == self._resource_caller_info:
             self.caller_info = self._client_caller_info
         self.app_name = app_name
-        self.key_name = app_name 
+        self.key_name = app_name
         self.key_filepath = C.DEFAULT_SSH_KEY_FILE_DIR / f"{self.key_name}.pem"
 
     def get_key_id(self) -> str:
@@ -42,7 +39,7 @@ class KP(AWSResourceBase):
                 DryRun=False,
                 IncludePublicKey=True
             )
-        except ClientError as e: 
+        except ClientError:
             return None
         return get_single_result_id(resource=existing_key, resource_type='KeyPair', plural=True)
 
@@ -72,7 +69,7 @@ class KP(AWSResourceBase):
             rtn = False
 
         return rtn
-        
+
     def create(self, ssh_key_filepath=None) -> bool:
         """Make a new ec2 keypair named for app"""
         existing_key_pair = self.describe()
@@ -80,7 +77,7 @@ class KP(AWSResourceBase):
         self.key_fingerprint = existing_key_pair['key_id']
 
         if self.key_id is not None:
-            #NOTE: You can't retreive key material unless you are creating the key
+            # NOTE: You can't retreive key material unless you are creating the key
             logger.warning(f"Ssh key already exists with id '{self.key_id}'")
         else:
             rtn = True
@@ -91,9 +88,7 @@ class KP(AWSResourceBase):
                 TagSpecifications=[
                     {
                         'ResourceType': 'key-pair',
-                        'Tags': [
-                            { 'Key': C.DEFAULT_APP_NAME, 'Value': self.app_name},
-                        ]
+                        'Tags': [ { 'Key': C.DEFAULT_APP_NAME, 'Value': self.app_name }, ]
                     },
                 ],
             )
@@ -118,8 +113,8 @@ class KP(AWSResourceBase):
                 DryRun=False,
                 IncludePublicKey=True
             )
-            rtn['key_id']           = existing_key['KeyPairs'][0]['KeyPairId']
-            rtn['key_fingerprint']  = existing_key['KeyPairs'][0]['KeyFingerprint']
+            rtn['key_id'] = existing_key['KeyPairs'][0]['KeyPairId']
+            rtn['key_fingerprint'] = existing_key['KeyPairs'][0]['KeyFingerprint']
             store_test_data(resource='AWSKeypair', action='describe_key_pairs', response_data=scrub_datetime(existing_key))
             return rtn
         except ClientError as e:
@@ -153,7 +148,7 @@ class KP(AWSResourceBase):
 
     def destroy(self, ssh_key_file=None) -> bool:
         if not ssh_key_file:
-            ssh_key_file=Path(self.app_name + '.pem')
+            ssh_key_file = Path(self.app_name + '.pem')
         key_id = self.get_key_id()
         if not key_id:
             logger.warning(f"No key for app '{self.app_name}'")
@@ -183,12 +178,10 @@ class KP(AWSResourceBase):
 
 if __name__ == '__main__':
     import boto3
-    import json
     c = boto3.client('ec2')
     kp = KP(client=c, app_name='asdf', ssh_key_filepath='.', dry_run=False )
-    #print(json.dumps(kp.get_key_pair(),indent=2))
-    #print(kp.destroy())
-    #print(json.dumps(kp.create(),indent=2))
+    # print(json.dumps(kp.get_key_pair(),indent=2))
+    # print(kp.destroy())
+    # print(json.dumps(kp.create(),indent=2))
     print()
     print(json.dumps(kp.describe(), indent=2))
-

@@ -34,17 +34,19 @@ from .utilities import QuickhostUnauthorized, Arn
 
 logger = logging.getLogger(__name__)
 
+
 class AWSApp(quickhost.AppBase, AWSResourceBase):
     """
     AWSApp
-    Sort-of a dataclass, sort-of not.
-    I've tried putting all the 'None' arguments that aren't an __init__() parameter into
-    their own class, but I found it to be a headache.
-    Although, it might be way more testable to have a configuration class... I think we're past that point.
+    Sort-of a dataclass, sort-of not.  I've tried putting all the 'None'
+    arguments that aren't an __init__() parameter into their own class, but I
+    found it to be a headache.  Although, it might be way more testable to have
+    a configuration class... I think we're past that point.
 
-    Args need to be evaluated on their own terms, because context is so important... e.g.
-    * 'ports' is not technically needed, but should be *settable* from CLI or Config
-    * 'ssh_key_filepath' is arguably not even a plugin argument
+    Args need to be evaluated on their own terms, because context is so
+    important... e.g.
+    * 'ports' is not technically needed, but should be *settable* from CLI or
+    * Config 'ssh_key_filepath' is arguably not even a plugin argument
     """
     plugin_name = 'aws'
 
@@ -64,7 +66,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         self.vpc_id = None
         self.subnet_id = None
         self.sgid = None
-        #self.load_default_config()
+        # self.load_default_config()
 
     def load_default_config(self, cache_ok=True, region=AWSConstants.DEFAULT_REGION, profile=AWSConstants.DEFAULT_IAM_USER):
         logger.debug("load default config")
@@ -96,15 +98,15 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         fill_char = '.'
         if heading:
             print(heading)
-            print(underline_char*len(heading))
+            print(underline_char * len(heading))
 
         # qualm pytest when running without -s
         if os.isatty(1):
             if os.get_terminal_size()[0] > 80:
                 termwidth = 40
             else:
-                termwidth = os.get_terminal_size()[0] 
-            for k,v in d.items():
+                termwidth = os.get_terminal_size()[0]
+            for k, v in d.items():
                 if not k.startswith("_"):
                     if heading:
                         k = underline_char + k
@@ -121,32 +123,33 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         """
         params = {
             "app_name": "uninstall-quickhost-aws",
-            # "region": plugin_destroy_args['region'], #@@@
-            "region": AWSConstants.DEFAULT_REGION, #@@@
+            # "region": plugin_destroy_args['region'],  # @@@
+            "region": AWSConstants.DEFAULT_REGION,  # @@@
             "profile": plugin_destroy_args['profile'],
         }
         whoami, _ = self.get_client(resource='iam', region=params['region'], profile=params['profile'])
         user_name = whoami['Arn'].split(":")[5].split("/")[-1]
         user_id = whoami['UserId']
         account = whoami['Account']
-        inp = input(f"About to initialize quickhost using:\nuser:\t\t{user_name} ({user_id})\naccount:\t{account}\n\nContinue? (y/n) ")
+        inp = input("About to destroy quickhost using:\nuser:\t\t{} ({})\naccount:\t{}\n\nContinue? (y/n) ".format(
+            user_name, user_id, account))
         if not inp.lower() == ('y' or 'yes'):
             return CliResponse(None, 'aborted', QHExit.ABORTED)
         logger.info("destroying remaining apps")
         AWSApp.destroy_all()
         logger.info("destroying networking")
-        networking = AWSNetworking(
+        AWSNetworking(
             app_name=params['app_name'],
             region=params['region'],
             profile=params['profile']
         ).destroy()
-        iam = Iam(
+        Iam(
             region=params['region'],
             profile=params['profile']
         ).destroy()
 
-        return CliResponse("Finished removing AWS resources from account '{}' in {}".format(account, params['region']), None, QHExit.OK)
-
+        return CliResponse("Finished removing AWS resources from account '{}' in {}".format(
+            account, params['region']), None, QHExit.OK)
 
     # @@@ CliResponse
     def plugin_init(self, init_args: dict) -> CliResponse:
@@ -157,6 +160,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         - VPC/Subnet/Routing/networking per-region
         must be run as an admin-like user
         """
+
         logger.debug('run init')
         finished_with_errors = False
         params = {
@@ -167,7 +171,8 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         user_name = whoami['Arn'].split(":")[5].split("/")[-1]
         user_id = whoami['UserId']
         account = whoami['Account']
-        inp = input(f"About to initialize quickhost using:\nuser:\t\t{user_name} ({user_id})\naccount:\t{account}\n\nContinue? (y/n) ")
+        inp = input("About to initialize quickhost using:\nuser:\t\t{} ({})\naccount:\t{}\n\nContinue? (y/n) ".format(
+            user_name, user_id, account))
         if not inp.lower() == ('y' or 'yes'):
             return CliResponse(None, 'aborted', QHExit.ABORTED)
         qh_iam = Iam(**params)
@@ -176,18 +181,18 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         except QuickhostUnauthorized as e:
             finished_with_errors = True
             logger.error(f"Failed to create initial IAM resources: {e}")
-        networking_params= AWSNetworking(
+        networking_params = AWSNetworking(
             app_name=self.app_name,
             profile=init_args['profile'],
             region=init_args['region'],
         )
-        try: 
+        try:
             networking_params.create()
         except Exception:
             finished_with_errors = True
             logger.error("huh. I didn't know networking threw exceptions.")
 
-        if finished_with_errors: #@@@
+        if finished_with_errors:  # @@@
             return CliResponse('finished init with errors', "<placeholder>", QHExit.GENERAL_FAILURE)
         else:
             return CliResponse('Done', None, QHExit.OK)
@@ -227,7 +232,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             if h['platform'] in ['Windows',]:
                 if params['show_password']:
                     passwords[h['instance_id']] = kp.windows_get_password(h['instance_id'])
-                else :
+                else:
                     passwords[h['instance_id']] = '*****************************'
         for h in hosts_describe:
             for inst_id, pw in passwords.items():
@@ -240,7 +245,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             'invoking user': '/'.join(self.user.split('/')[1:])
         }
         # idk man
-        self._print_loaded_args(networking_params,heading=f"global params")
+        self._print_loaded_args(networking_params, heading="global params")
         self._print_loaded_args(caller_info)
         self._print_loaded_args(iam_vals)
         self._print_loaded_args(sg_describe)
@@ -248,23 +253,23 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         if hosts_describe is None:
             logger.warning("No hosts found for app " + self.app_name)
         else:
-            for i,host in enumerate(hosts_describe):
+            for i, host in enumerate(hosts_describe):
                 self._print_loaded_args(host, heading=f"host {i}")
         if kp_describe and hosts_describe and sg_describe:
             return CliResponse('Done', None, QHExit.OK)
         else:
             return CliResponse(None, "Check logs for errors", 1)
 
-    #@@@ need to get regions...
+    # @@@ need to get regions...
     @classmethod
     def list_all(self):
         return CliResponse(json.dumps({
             "apps": AWSHost(
                 app_name="list-all",
-                profile=AWSConstants.DEFAULT_IAM_USER, #@@@
-                region=AWSConstants.DEFAULT_REGION, #@@@
-            ).get_all_running_apps(region=AWSConstants.DEFAULT_REGION) #@@@
-            #...
+                profile=AWSConstants.DEFAULT_IAM_USER,  # @@@
+                region=AWSConstants.DEFAULT_REGION,  # @@@
+            ).get_all_running_apps(region=AWSConstants.DEFAULT_REGION)  # @@@
+            # ...
         }, indent=3), None, QHExit.OK)
 
     @classmethod
@@ -272,8 +277,8 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         apps = AWSHost(
             app_name="destroy-all",
             profile=AWSConstants.DEFAULT_IAM_USER,
-            region=AWSConstants.DEFAULT_REGION, #@@@
-        ).get_all_running_apps(region=AWSConstants.DEFAULT_REGION) #@@@
+            region=AWSConstants.DEFAULT_REGION,  # @@@
+        ).get_all_running_apps(region=AWSConstants.DEFAULT_REGION)  # @@@
         if apps is None:
             return CliResponse("Nothing to destroy.", None, QHExit.OK)
         logger.info("Destroying {} apps".format(len(apps)))
@@ -282,7 +287,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             app.destroy(args={
                 "h": False,
                 "profile": AWSConstants.DEFAULT_IAM_USER,
-                "region": AWSConstants.DEFAULT_REGION, #@@@ need to get region from AWSApp.list_all
+                "region": AWSConstants.DEFAULT_REGION,  # @@@ need to get region from AWSApp.list_all
                 "yes": True
             })
             logger.info("Destroyed app '{}'".format(app.app_name))
@@ -313,7 +318,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
         if host.describe() is not None:
             logger.error(f"app named '{self.app_name}' already exists")
             return CliResponse(None, f"app named '{self.app_name}' already exists", QHExit.ABORTED)
-            
+
         kp_created = kp.create()
         sg_created = sg.create(
             ports=params['ports'],
@@ -330,7 +335,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             dry_run=params['dry_run']
         )
         if kp_created and hosts_created and sg_created:
-            return CliResponse( 'Done', None, QHExit.OK)
+            return CliResponse('Done', None, QHExit.OK)
         else:
             return CliResponse('finished creating hosts with warnings', f"{kp_created=}, {hosts_created=}, {sg_created=}", QHExit.GENERAL_FAILURE)
 
@@ -416,7 +421,7 @@ class AWSApp(quickhost.AppBase, AWSResourceBase):
             make_params['ssh_key_filepath'] = args['ssh_key_filepath']
         else:
             make_params['ssh_key_filepath'] = f"{self.app_name}.pem"
-        # the rest 
+        # the rest
         if 'dry_run' in flags:
             make_params['dry_run'] = args['dry_run']
         if 'host_count' in flags:

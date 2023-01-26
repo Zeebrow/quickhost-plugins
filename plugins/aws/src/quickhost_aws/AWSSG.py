@@ -1,17 +1,15 @@
-from typing import Tuple, List, Union
-from dataclasses import dataclass
+from typing import Tuple, List
 import logging
 
 import botocore.exceptions
 
 from quickhost import store_test_data, scrub_datetime
 
-from .constants import AWSConstants
 from .utilities import QH_Tag, UNDEFINED
 from .AWSResource import AWSResourceBase
 
-
 logger = logging.getLogger(__name__)
+
 
 class SG(AWSResourceBase):
     def __init__(self, app_name, profile, region, vpc_id):
@@ -35,11 +33,12 @@ class SG(AWSResourceBase):
             )
             return dsg['SecurityGroups'][0]['GroupId']
         except botocore.exceptions.ClientError as e:
+            # @@@ huh
             print(e)
             print(e['Error'])
             print(e['Code'])
             logger.debug(f"Could not get sg for app '{self.app_name}':\n{e}")
-            return 
+            return
 
     def create(self, cidrs, ports, dry_run=False) -> bool:
         rtn = True
@@ -48,11 +47,13 @@ class SG(AWSResourceBase):
                 Description="Made by quickhost",
                 GroupName=self.app_name,
                 VpcId=self.vpc_id,
-                TagSpecifications=[{ 'ResourceType': 'security-group',
+                TagSpecifications=[{
+                    'ResourceType': 'security-group',
                     'Tags': [
                         { 'Key': 'Name', 'Value': self.app_name },
                         QH_Tag(self.app_name)
-                ]}],
+                    ]
+                }],
                 DryRun=dry_run
             )
             self.sgid = sg['GroupId']
@@ -74,7 +75,7 @@ class SG(AWSResourceBase):
                 logger.warning(f"No security group found for app '{self.app_name}'")
                 return False
             # @@@ this returns None. Might want to confirm deletion.
-            self.client.delete_security_group( GroupId=sg_id)
+            self.client.delete_security_group(GroupId=sg_id)
             logger.info(f"deleting security group '{sg_id}'")
             return True
         except botocore.exceptions.ClientError as e:
@@ -115,7 +116,7 @@ class SG(AWSResourceBase):
     def describe(self):
         logger.debug("AWSSG.describe")
         rtn = {
-            'sgid': UNDEFINED, #giving this a try
+            'sgid': UNDEFINED,  # giving this a try
             'ports': [],
             'cidrs': [],
             'ok': True,
@@ -129,7 +130,7 @@ class SG(AWSResourceBase):
                 ],
             )
             self.sgid = response['SecurityGroups'][0]['GroupId']
-            rtn['sgid']     = response['SecurityGroups'][0]['GroupId'] 
+            rtn['sgid'] = response['SecurityGroups'][0]['GroupId']
 
             ports, cidrs, ingress_ok = self._describe_sg_ingress(dsg_ip_permissions=response['SecurityGroups'][0]['IpPermissions'])
             self.ports = ports
@@ -138,7 +139,7 @@ class SG(AWSResourceBase):
             rtn['cidrs'] = cidrs
 
             store_test_data(resource='AWSSG', action='describe_security_groups', response_data=scrub_datetime(response))
-            return rtn 
+            return rtn
         except IndexError:
             logger.debug("No security group with name {} found for region {}".format(self.app_name, self.region))
             return None
@@ -174,10 +175,7 @@ class SG(AWSResourceBase):
                         p['FromPort'],
                         p['IpProtocol']
                     ))
-        except Exception as e:
+        except Exception:
             ok = False
 
         return (ports, cidrs, ok)
-
-
-

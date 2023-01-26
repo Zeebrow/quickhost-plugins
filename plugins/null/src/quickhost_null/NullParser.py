@@ -1,11 +1,10 @@
 import argparse
 import logging
 
-import click
-
 from quickhost import ParserBase
 
 logger = logging.getLogger(__name__)
+
 
 class NullParser(ParserBase):
     def __init__(self):
@@ -18,7 +17,7 @@ class NullParser(ParserBase):
         describe_parser = subp.add_parser("describe")
         update_parser = subp.add_parser("update")
         destroy_parser = subp.add_parser("destroy")
-        list_all_parser = subp.add_parser("list-all")
+        subp.add_parser("list-all")
         destroy_all_parser = subp.add_parser("destroy-all", help="null app destroy-all help @@@")
         self.add_init_parser_arguments(init_parser)
         self.add_make_parser_arguments(make_parser)
@@ -29,7 +28,7 @@ class NullParser(ParserBase):
 
     def add_destroy_all_parser_arguments(self, parser: argparse.ArgumentParser):
         parser.add_argument("-y", "--yes", action='store_true', help="force deletion without prompting for confirmation")
-        
+
     def add_init_parser_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--null-init-arg", action='store_true', help='set an init property of the null app')
 
