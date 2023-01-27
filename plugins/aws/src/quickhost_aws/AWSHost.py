@@ -267,7 +267,7 @@ class AWSHost(AWSResourceBase):
         """
         none_val = None
         # @@@ E731 I want test cases first
-        _try_get_attr = lambda d, attr: d[attr] if attr in d.keys() else none_val
+        _try_get_attr = lambda d, attr: d[attr] if attr in d.keys() else none_val  # noqa: E731
         return {
             'app_name': self.app_name,
             'ami': _try_get_attr(host, 'ImageId'),

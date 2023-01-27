@@ -15,7 +15,7 @@
 
 from .AWSApp import AWSApp
 from .PluginArgs import AWSParser
-from .AWSSG import SG  # @@@ for tests ... ???
+from .AWSSG import SG  # noqa: F401
 
 
 def get_parser():
