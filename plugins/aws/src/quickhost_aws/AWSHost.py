@@ -18,8 +18,10 @@ import time
 import logging
 from datetime import datetime
 from collections import defaultdict
+from dataclasses import dataclass
 
 from botocore.exceptions import ClientError
+import boto3
 
 import quickhost
 from quickhost import APP_CONST as QHC
@@ -36,19 +38,34 @@ class AWSHost(AWSResourceBase):
     Class for AWS host operations.
     """
     def __init__(self, app_name, profile, region):
-        self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
-        self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
-        if self._client_caller_info == self._resource_caller_info:
-            self.caller_info = self._client_caller_info
+        session = self._get_session(profile=profile, region=region)
+        self.region = region
+        self.client = session.client('ec2')
+        self.ec2 = session.resource('ec2')
         self.app_name = app_name
         self.host_count = None
 
-    def create(self, num_hosts, instance_type, sgid, subnet_id, userdata, key_name, _os, dry_run=False):
-        image_id = self.get_latest_image(_os)
+    def create(self, num_hosts, instance_type, sgid, subnet_id, userdata, key_name, _os, disk_size=None, dry_run=False):
+        rtn = {
+            "region": self.region,
+            "num_hosts": num_hosts,
+            "instance_type": instance_type,
+            "sgid": sgid,
+            "subnet_id": subnet_id,
+            "userdata": userdata,
+            "key_name": key_name,
+            "os": _os,
+        }
+
+        latest_image = self.get_latest_image(_os)
+        image_id = latest_image['image_id']
+        rtn['image_id'] = image_id
+
         self.host_count = num_hosts
+        rtn['num_hosts'] = num_hosts
         if self.get_host_count() > 0:
             logger.error(f"Hosts for app '{self.app_name}' already exist")
-            return False
+            return None
         run_instances_params = {
             'ImageId': image_id,
             'InstanceType': instance_type,
@@ -77,9 +94,29 @@ class AWSHost(AWSResourceBase):
                 ]},
             ],
         }
+
         if userdata:
             run_instances_params['UserData'] = self.get_userdata(userdata)
-        response = self.client.run_instances(**run_instances_params)
+
+        if disk_size is not None:
+            if disk_size < latest_image['ami_disk_size']:
+                logger.warning("Requested dist size of {} GiB is smaller than the ami disk size ({}), using ami disk size instead.".format(disk_size, latest_image['disk_size']))
+                tgt_disk_size = latest_image['ami_disk_size']
+            else:
+                tgt_disk_size = disk_size
+        else:
+            tgt_disk_size = latest_image['ami_disk_size']
+        rtn['disk_size'] = tgt_disk_size
+
+        response = self.client.run_instances(
+            **run_instances_params,
+            BlockDeviceMappings=[
+                {
+                    'DeviceName': latest_image['device_name'],
+                    'Ebs': { 'VolumeSize': tgt_disk_size, },
+                }
+            ])
+
         r_cleaned = quickhost.scrub_datetime(response)
         store_test_data(resource='AWSHost', action='create', response_data=r_cleaned)
         self.wait_for_hosts_to_start(num_hosts)
@@ -90,9 +127,9 @@ class AWSHost(AWSResourceBase):
             logger.debug(f"match {_os}")
             match _os:
                 case "ubuntu":
-                    ssh_strings.append(f"ssh -i {key_name} ubuntu@{inst['public_ip']}")
+                    ssh_strings.append(f"ssh -i {key_name}.pem ubuntu@{inst['public_ip']}")
                 case "amazon-linux-2":
-                    ssh_strings.append(f"ssh -i {key_name} ec2-user@{inst['public_ip']}")
+                    ssh_strings.append(f"ssh -i {key_name}.pem ec2-user@{inst['public_ip']}")
                 case "windows":
                     ssh_strings.append(f"*{inst['public_ip']}")
                 case "windows-core":
@@ -100,7 +137,7 @@ class AWSHost(AWSResourceBase):
                 case _:
                     logger.warning(f"invalid os '{_os}'")
         [ print(f"host {i}) {ssh}") for i, ssh in enumerate(ssh_strings) ]
-        return True
+        return rtn
 
     def describe(self) -> List[Any] | None:
         logger.debug("AWSHost.describe")
@@ -145,16 +182,10 @@ class AWSHost(AWSResourceBase):
 
     @classmethod
     def get_all_running_apps(self, region) -> List[Any] | None:
-        dummy_awshost_instance_client = AWSHost(
-            app_name='list-all',
-            profile=AWSConstants.DEFAULT_IAM_USER,
-            region=region,
-        ).get_client(
-            'ec2',
-            profile=AWSConstants.DEFAULT_IAM_USER,
-            region=region,
-        )[1]
-        all_running_hosts = dummy_awshost_instance_client.describe_instances(
+        session = boto3.session.Session(profile_name=AWSConstants.DEFAULT_IAM_USER, region_name=region)
+        client = session.client('ec2')
+
+        all_running_hosts = client.describe_instances(
             Filters=[
                 { 'Name': 'tag-key', 'Values': [QHC.DEFAULT_APP_NAME] },
                 { 'Name': 'instance-state-name', 'Values': ['running'] },
@@ -258,7 +289,11 @@ class AWSHost(AWSResourceBase):
             DryRun=False
         )
         sortedimages = sorted(response['Images'], key=lambda x: datetime.strptime(x['CreationDate'], '%Y-%m-%dT%H:%M:%S.%fZ'))
-        return sortedimages[-1]['ImageId']
+        return {
+            "image_id": sortedimages[-1]['ImageId'],
+            "ami_disk_size": sortedimages[-1]['BlockDeviceMappings'][0]['Ebs']['VolumeSize'],
+            "device_name": sortedimages[-1]['BlockDeviceMappings'][0]['DeviceName'],
+        }
 
     def _parse_host_output(self, host: dict, none_val=None):
         """
@@ -299,8 +334,7 @@ class AWSHost(AWSResourceBase):
         count = 0
         for r in app_hosts['Reservations']:
             logger.debug(f"got {len(r['Instances'])} instances")
-            # @@@ get rid of i
-            for i, host in enumerate(r['Instances']):
+            for host in r['Instances']:
                 if host['State']['Name'] == 'running':
                     count += 1
         return count

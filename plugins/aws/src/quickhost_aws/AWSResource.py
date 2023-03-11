@@ -27,11 +27,11 @@ class AWSResourceBase:
     Base class to consolidate session objects
     """
 
-    def _get_session(self, profile, region):
+    def _get_session(self, profile=AWSConstants.DEFAULT_IAM_USER, region=AWSConstants.DEFAULT_REGION) -> boto3.Session:
         session = boto3.session.Session(profile_name=profile, region_name=region)
         return session
 
-    def get_resource(self, resource, profile, region):
+    def get_caller_info(self, profile, region):
         session = self._get_session(profile=profile, region=region)
         sts = session.client('sts')
         whoami = sts.get_caller_identity()
@@ -42,20 +42,20 @@ class AWSResourceBase:
 
         if self._get_user_name_from_arn(whoami['Arn']) != AWSConstants.DEFAULT_IAM_USER:
             logger.warning(f"You're about to do stuff with the non-quickhost user {whoami['Arn']}")
-        return (whoami, session.resource(resource))
+        return whoami
 
-    def get_client(self, resource, profile, region):
-        session = self._get_session(profile=profile, region=region)
-        sts = session.client('sts')
-        whoami = sts.get_caller_identity()
-        whoami['username'] = self._get_user_name_from_arn(whoami['Arn'])
-        whoami['region'] = session.region_name
-        whoami['profile'] = session.profile_name
-        _ = whoami.pop('ResponseMetadata')
+    # def get_client(self, resource, profile, region):
+    #     session = self._get_session(profile=profile, region=region)
+    #     sts = session.client('sts')
+    #     whoami = sts.get_caller_identity()
+    #     whoami['username'] = self._get_user_name_from_arn(whoami['Arn'])
+    #     whoami['region'] = session.region_name
+    #     whoami['profile'] = session.profile_name
+    #     _ = whoami.pop('ResponseMetadata')
 
-        if self._get_user_name_from_arn(whoami['Arn']) != AWSConstants.DEFAULT_IAM_USER:
-            logger.warning(f"You're about to do stuff with the non-quickhost user {whoami['Arn']}")
-        return (whoami, session.client(resource))
+    #     if self._get_user_name_from_arn(whoami['Arn']) != AWSConstants.DEFAULT_IAM_USER:
+    #         logger.warning(f"You're about to do stuff with the non-quickhost user {whoami['Arn']}")
+    #     return (whoami, session.client(resource))
 
     # @@@ out-of-place
     def _get_user_name_from_arn(self, arn: str):

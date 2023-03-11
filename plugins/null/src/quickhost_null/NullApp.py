@@ -75,3 +75,6 @@ under certain conditions; type `show c' for details.
     @classmethod
     def destroy_all(self):
         return ("stdout null", "stderr null", 0)
+
+    def plugin_destroy(self):
+        return ("stdout null", "stderr null", 0)

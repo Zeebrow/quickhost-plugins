@@ -28,14 +28,16 @@ logger = logging.getLogger(__name__)
 
 class SG(AWSResourceBase):
     def __init__(self, app_name, profile, region, vpc_id):
-        self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
-        self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
-        if self._client_caller_info == self._resource_caller_info:
-            self.caller_info = self._client_caller_info
+        session = self._get_session(profile=profile, region=region)
+        self.client = session.client('ec2')
+        self.ec2 = session.resource('ec2')
         self.app_name = app_name
         self.vpc_id = vpc_id
         self.region = region
         self.profile = profile
+
+    def _load(self):
+        pass
 
     def get_security_group_id(self) -> str:
         dsg = None

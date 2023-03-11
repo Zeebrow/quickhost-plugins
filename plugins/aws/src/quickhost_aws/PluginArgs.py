@@ -129,12 +129,6 @@ class AWSParser(ParserBase):
             required=False,
             default=SUPPRESS,
             help="download newly created key to target file (default is APP_NAME.pem in cwd)")
-        # @@@ remove
-        parser.add_argument(
-            "-y", "--dry-run",
-            required=False,
-            action='store_true',
-            help="prevents any resource creation when set")
         parser.add_argument(
             "-p", "--port",
             required=False,
@@ -179,6 +173,13 @@ class AWSParser(ParserBase):
                 "windows",
                 "windows-core",
             ])
+        parser.add_argument(
+            "-s", "--disk-size",
+            required=False,
+            type=int,
+            action='store',
+            default=SUPPRESS,
+            help="(UNTESTED) Size in GiB of root volume (30 or less qualifies for free tier)")
 
     def add_describe_parser_arguments(self, parser: ArgumentParser):
         parser.add_argument(

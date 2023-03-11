@@ -16,6 +16,7 @@
 class AWSConstants:
     DEFAULT_HOST_OS = 'amazon-linux-2'
     DEFAULT_IAM_USER = 'quickhost-user'
+    DEFAULT_IAM_GROUP = f"{DEFAULT_IAM_USER}s"
     DEFAULT_REGION = 'us-east-1'
     AVAILABLE_REGIONS = [
         'eu-north-1',

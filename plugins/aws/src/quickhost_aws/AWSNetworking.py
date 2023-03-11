@@ -30,16 +30,22 @@ class AWSNetworking(AWSResourceBase):
     DefaultTag = { 'Value': C.DEFAULT_APP_NAME, 'Key': 'Name' }
 
     # @@@ testme
-    @classmethod
+    # ERROR: AWSNetworking.TagSpec() takes 1 positional argument but 2 were given
+    # Traceback (most recent call last):
+    #   File "/home/zeebrow/repos/github.com/zeebrow/quickhost-plugins/plugins/aws/src/quickhost_aws/AWSApp.py", line 200, in plugin_init
+    #     networking_params.create()
+    #   File "/home/zeebrow/repos/github.com/zeebrow/quickhost-plugins/plugins/aws/src/quickhost_aws/AWSNetworking.py", line 59, in create
+    #     TagSpecifications=[ AWSNetworking.TagSpec('vpc'), ]
+    # TypeError: AWSNetworking.TagSpec() takes 1 positional argument but 2 were given
+    # @classmethod # 
     def TagSpec(resource):
         return { 'ResourceType': resource, 'Tags': [ AWSNetworking.DefaultTag ] }
 
     def __init__(self, app_name, profile, region, dry_run=False):
         self.app_name = app_name
-        self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
-        self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
-        if self._client_caller_info == self._resource_caller_info:
-            self.caller_info = self._client_caller_info
+        session = self._get_session(profile=profile, region=region)
+        self.client = session.client('ec2')
+        self.ec2 = session.resource('ec2')
         self.dry_run = dry_run
         self.vpc_id = None
         self.igw_id = None
@@ -170,7 +176,7 @@ class AWSNetworking(AWSResourceBase):
         }
 
     @quickmemo
-    def describe(self):
+    def describe(self, use_cache=True):
         logger.debug("AWSNetworking.describe")
         try:
             # permissions exceptions are normally caught in AWSApp.py

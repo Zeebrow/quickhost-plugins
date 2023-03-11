@@ -37,10 +37,9 @@ class KP(AWSResourceBase):
     CRUD for ssh keys.
     """
     def __init__(self, app_name, profile, region):
-        self._client_caller_info, self.client = self.get_client('ec2', profile=profile, region=region)
-        self._resource_caller_info, self.ec2 = self.get_resource('ec2', profile=profile, region=region)
-        if self._client_caller_info == self._resource_caller_info:
-            self.caller_info = self._client_caller_info
+        session = self._get_session(profile=profile, region=region)
+        self.client = session.client('ec2')
+        self.ec2 = session.resource('ec2')
         self.app_name = app_name
         self.key_name = app_name
         self.key_filepath = C.DEFAULT_SSH_KEY_FILE_DIR / f"{self.key_name}.pem"

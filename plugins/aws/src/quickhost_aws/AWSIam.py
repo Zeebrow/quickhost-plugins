@@ -19,6 +19,7 @@ from configparser import ConfigParser
 from pathlib import Path
 
 from botocore.exceptions import ClientError
+import boto3
 
 from quickhost import scrub_datetime
 
@@ -35,12 +36,12 @@ class Iam(AWSResourceBase):
     `main.py aws init` and future `main.py aws uninstall` actions.
     """
     def __init__(self, profile, region):
-        self._client_caller_info, self.client = self.get_client('iam', profile=profile, region=region)
-        self._resource_caller_info, self.iam = self.get_resource('iam', profile=profile, region=region)
-        if self._client_caller_info == self._resource_caller_info:
-            self.caller_info = self._client_caller_info
+        self.caller_info = self.get_caller_info(profile=profile, region=region)
         self.iam_user = AWSConstants.DEFAULT_IAM_USER
-        self.iam_group = f"{AWSConstants.DEFAULT_IAM_USER}s"
+        self.iam_group = AWSConstants.DEFAULT_IAM_GROUP
+        session = self._get_session(profile=profile, region=region)
+        self.client = session.client('iam')
+        self.iam = session.resource('iam')
 
     def create(self):
         """
@@ -51,14 +52,21 @@ class Iam(AWSResourceBase):
         - Create IAM group and add user
         - Create IAM policies for CRUD and attach group
         """
+        rtn = {
+            "iam_user_arn": None,
+            "iam_group_arn": None,
+        }
         if self.caller_info['username'] == AWSConstants.DEFAULT_IAM_USER:
             logger.warning("The default quickhost user is not allowed to 'init'!")
             raise QuickhostUnauthorized("The default quickhost user is not allowed to 'init'!", operation='app init')
-        self.create_user_group()
+        rtn = {
+            **self.create_iam_user_and_group()
+        }
         self._create_user_config()
         self._create_user_credentials()
         self.create_policies()
         self.attach_policies_and_group()
+        return rtn
 
     def describe(self):
         """
@@ -153,7 +161,11 @@ class Iam(AWSResourceBase):
                 return rtn
         return rtn
 
-    def create_user_group(self):
+    def create_iam_user_and_group(self):
+        rtn = {
+            "iam_user_arn": None,
+            "iam_group_arn": None,
+        }
         iam = self.iam
         user = iam.User(self.iam_user)
         group = iam.Group(self.iam_group)
@@ -162,22 +174,28 @@ class Iam(AWSResourceBase):
                 Path='/quickhost/',
                 Tags=[ { 'Key': 'quickhost', 'Value': 'aws' }, ]
             )
+            rtn['iam_user_arn'] = user.arn
             logger.info(f"Created user '{self.iam_user}'")
         except ClientError as e:
             code = e.__dict__['response']['Error']['Code']
             if code == 'EntityAlreadyExists':
+                rtn['iam_user_arn'] = self.client.get_user(UserName=self.iam_user)['User']['Arn']
                 logger.info(f"User '{self.iam_user}' already exists.")
+                logger.info(f"User '{user}' already exists.")
         try:
             group.create(
                 Path='/quickhost/',
-                GroupName=self.iam_group
+                GroupName=self.iam_group,
                 # Tags=[ { 'Key': 'quickhost', 'Value': 'aws' }, ]
             )
+            rtn['iam_group_arn'] = group.arn
             logger.info(f"Created group '{self.iam_group}'")
         except ClientError as e:
             code = e.__dict__['response']['Error']['Code']
             if code == 'EntityAlreadyExists':
+                rtn['iam_group_arn'] = self.client.get_group(GroupName=self.iam_group)['Group']['Arn']
                 logger.info(f"Group '{self.iam_group}' already exists.")
+        return rtn
 
     def qh_policy_arns(self):
         rtn = {
@@ -274,6 +292,7 @@ class Iam(AWSResourceBase):
             k.delete()
         return
 
+    #@@@ default region
     def _create_user_config(self, region='us-east-1', output='json'):
         current_credentials = self.describe()
         if current_credentials['credentials']['default-region'] is None:
